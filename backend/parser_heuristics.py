@@ -1,9 +1,35 @@
 import re
 from datetime import datetime
 
+def clean_noisy_text(text_line):
+    """
+    Cleans OCR scanning noise, stray characters, and common digit typos (like letter O/o instead of 0).
+    """
+    cleaned = text_line.strip()
+    
+    # 1. Repair common OCR digit typos: 'O' or 'o' scanned instead of '0' inside numbers
+    # E.g. "25O00" -> "25000", "12-O4-1992" -> "12-04-1992"
+    cleaned = re.sub(r'(?<=\d)[Oo](?=\d)', '0', cleaned) # O surrounded by digits
+    cleaned = re.sub(r'(?<=\d)[Oo]$', '0', cleaned)     # O at the end of a number
+    cleaned = re.sub(r'^[Oo](?=\d)', '0', cleaned)     # O at the start of a number
+    
+    # 2. Repair dates with O/o typos, e.g. "12-O4-1992" or "12-o4-1992"
+    # Matches patterns like DD-O4-YYYY or DD-04-oYYY
+    cleaned = re.sub(r'\b(\d{1,2})[-/\.][Oo](\d)[-/\.](\d{4})\b', r'\1-0\2-\3', cleaned)
+    cleaned = re.sub(r'\b(\d{1,2})[-/\.](\d)[Oo][-/\.](\d{4})\b', r'\1-\20-\3', cleaned)
+    cleaned = re.sub(r'\b(\d{1,2})[-/\.][Oo][Oo][-/\.](\d{4})\b', r'\1-00-\2', cleaned)
+    cleaned = re.sub(r'\b[Oo](\d)[-/\.](\d{1,2})[-/\.](\d{4})\b', r'0\1-\2-\3', cleaned)
+    
+    # 3. Remove typical OCR vertical bars or bracket noise in numeric/date lines
+    # E.g. "| 25000" -> "25000", "[12-04-1992]" -> "12-04-1992"
+    if any(kw in cleaned.lower() for kw in ["rs", "income", "salary", "disability", "age", "dob", "date"]):
+        cleaned = re.sub(r'[\|\[\]\~\^\#\_]', '', cleaned).strip()
+        
+    return cleaned
+
 def parse_extracted_text(text_lines):
     """
-    Highly accurate, production-grade MACT legal parser.
+    Highly accurate, production-grade, noise-tolerant MACT legal parser.
     Performs Page-wise parsing, Section detection, Context-aware extraction,
     Proximity label-near-value matching, and Multi-source validation.
     
@@ -17,6 +43,9 @@ def parse_extracted_text(text_lines):
     Ignores:
     - Cited judgments, precedents, and apex court legal discussions.
     """
+    # Clean OCR noise on each line
+    cleaned_lines = [clean_noisy_text(line) for line in text_lines]
+
     # 1. INITIALIZE SUGGESTIONS AND CONFIDENCE CORES
     suggestions = {
         "case_type": "injury",       # Default
@@ -54,7 +83,7 @@ def parse_extracted_text(text_lines):
     pages = []
     current_page = []
     
-    for line in text_lines:
+    for line in cleaned_lines:
         match = re.match(r'^--- PAGE (\d+) ---$', line)
         if match:
             if current_page:
@@ -67,7 +96,7 @@ def parse_extracted_text(text_lines):
         
     # If no PAGE headers were injected, treat the whole document as a single page
     if not pages:
-        pages = ["\n".join(text_lines)]
+        pages = ["\n".join(cleaned_lines)]
 
     full_text = "\n".join(pages)
     full_text_lower = full_text.lower()
@@ -85,19 +114,39 @@ def parse_extracted_text(text_lines):
         "general": []
     }
     
-    # Standard headers indicating the target legal sections
-    section_headers = {
-        "events": ["list of dates", "chronological list", "dates of events", "particulars of events", "dates and events", "timeline"],
-        "accident": ["details of accident", "accident details", "manner of accident", "accident particulars", "occurrence", "facts of the case", "accident occurred at", "place of accident"],
-        "petition": ["claim petition", "claimant details", "averments of petition", "averments", "the petition", "details of deceased", "particulars of the claim", "injured details", "petitioners", "claimant Profile"],
-        "table": ["compensation table", "quantum of compensation", "assessment of compensation", "breakup of award", "details of compensation", "quantum", "calculation", "award table"],
-        "prayer": ["prayer", "relief claimed", "wherefore the petitioner", "prays for", "prayer clause", "reliefs"]
+    # Noise-tolerant regexes for finding target sections
+    section_patterns = {
+        "events": [
+            r'list\s+of\s+dates', r'chronological\s+list', r'dates\s+and\s+events', 
+            r'particulars\s+of\s+events', r'timeline'
+        ],
+        "accident": [
+            r'details?\s+of\s+accident', r'accident\s+details?', r'manner\s+of\s+accident', 
+            r'accident\s+particulars', r'occurrence', r'facts\s+of\s+the\s+case',
+            r'accident\s+occurred\s+at', r'place\s+of\s+accident'
+        ],
+        "petition": [
+            r'claim\s+petition', r'claimants?\s+details?', r'averments?\s+of\s+petition', 
+            r'averments?', r'the\s+petition', r'details?\s+of\s+deceased', 
+            r'particulars\s+of\s+the\s+claim', r'injured\s+details?', r'petitioners?',
+            r'claimants?\s+profile'
+        ],
+        "table": [
+            r'compensation\s+table', r'quantum\s+of\s+compensation', r'assessment\s+of\s+compensation', 
+            r'breakup\s+of\s+award', r'details?\s+of\s+compensation', r'quantum', 
+            r'calculation', r'award\s+table'
+        ],
+        "prayer": [
+            r'prayer', r'relief\s+claimed', r'wherefore\s+the\s+petitioner', 
+            r'prays\s+for', r'prayer\s+clause', r'reliefs'
+        ]
     }
     
     # Headers to explicitly ignore/discard (prevents cited precedents from polluting extraction)
-    ignore_headers = [
-        "citations", "precedents cited", "referred to", "in the case of", "supreme court held", 
-        "apex court in", "learned counsel for", "judgment referred", "relied upon"
+    ignore_patterns = [
+        r'citations?', r'precedents?\s+cited', r'referred\s+to', r'in\s+the\s+case\s+of', 
+        r'supreme\s+court\s+held', r'apex\s+court\s+in', r'learned\s+counsel\s+for', 
+        r'judgment\s+referred', r'relied\s+upon'
     ]
 
     # Process each page to isolate sections
@@ -112,21 +161,24 @@ def parse_extracted_text(text_lines):
             line_lower = lines_lower[line_idx]
             
             # Check if this line is an IGNORE header -> route to general/ignore
-            if any(ih in line_lower for ih in ignore_headers):
+            if any(re.search(ip, line_lower) for ip in ignore_patterns):
                 current_section = "general"
                 continue
                 
             # Check if this line signals a section boundary change
             header_detected = False
-            for sec_name, keywords in section_headers.items():
-                if any(kw in line_lower for kw in keywords):
-                    # Save accumulated lines from the previous section
-                    if section_lines:
-                        sections[current_section].append(("\n".join(section_lines), page_idx))
-                    current_section = sec_name
-                    section_lines = [line]
-                    header_detected = True
+            for sec_name, regex_patterns in section_patterns.items():
+                if header_detected:
                     break
+                for pattern in regex_patterns:
+                    if re.search(pattern, line_lower):
+                        # Save accumulated lines from the previous section
+                        if section_lines:
+                            sections[current_section].append(("\n".join(section_lines), page_idx))
+                        current_section = sec_name
+                        section_lines = [line]
+                        header_detected = True
+                        break
             
             if not header_detected:
                 section_lines.append(line)
@@ -150,7 +202,6 @@ def parse_extracted_text(text_lines):
     death_keywords = ["death", "deceased", "fatal", "post mortem", "died on", "funeral", "consortium", "loss of estate", "widow"]
     injury_keywords = ["injury", "injured", "treatment", "disability certificate", "fracture", "wounds", "medical expenses", "pain and suffering"]
     
-    # Prioritize Judgment findings or Petition profile details
     death_score = sum(3 for kw in death_keywords if kw in petition_text.lower()) + sum(1 for kw in death_keywords if kw in general_text.lower())
     injury_score = sum(3 for kw in injury_keywords if kw in petition_text.lower()) + sum(1 for kw in injury_keywords if kw in general_text.lower())
     
@@ -213,7 +264,6 @@ def parse_extracted_text(text_lines):
     ]
     
     place_found = False
-    # Proximity matching in preferred sections first
     for text_source, confidence_weight in [(accident_text, 0.95), (events_text, 0.8), (general_text, 0.65)]:
         if place_found:
             break
@@ -280,7 +330,6 @@ def parse_extracted_text(text_lines):
         r'\bw\/o\b\s*(?:shri)?\s*([A-Za-z\s\.]{3,30})'
     ]
 
-    # Process Name
     name_found = False
     for text_source, confidence_weight in [(petition_text, 0.9), (general_text, 0.65)]:
         if name_found:
@@ -297,7 +346,6 @@ def parse_extracted_text(text_lines):
                     name_found = True
                     break
 
-    # Process Father/Husband Name
     father_found = False
     for text_source, confidence_weight in [(petition_text, 0.9), (general_text, 0.65)]:
         if father_found:
@@ -410,7 +458,6 @@ def parse_extracted_text(text_lines):
             if doa.month < dob.month or (doa.month == dob.month and doa.day < dob.day):
                 calculated_age -= 1
                 
-            # If both DOB & DOA are highly confident and conflict with extracted age, calculate age
             if calculated_age >= 0 and calculated_age <= 100:
                 if str(suggestions["age"]) != str(calculated_age):
                     suggestions["age"] = calculated_age
@@ -451,8 +498,19 @@ def parse_extracted_text(text_lines):
             suggestions["dependents"] = ""
             confidences["dependents"] = 0.0
 
-    # Format output dictionary to match the expected Suggestions structure
-    # We store the computed confidence levels to let the frontend verify/read if needed
+    # 5. Chronological chronological consistency cross-repair
+    # If DOB and Accident Date are swapped or mapped incorrectly, correct them chronologically
+    if suggestions["date_of_birth"] and suggestions["date_of_accident"]:
+        try:
+            dob_val = datetime.strptime(suggestions["date_of_birth"], "%d-%m-%Y")
+            doa_val = datetime.strptime(suggestions["date_of_accident"], "%d-%m-%Y")
+            if dob_val > doa_val:
+                # Swapped dates! Swap them back to be logically correct
+                suggestions["date_of_birth"], suggestions["date_of_accident"] = suggestions["date_of_accident"], suggestions["date_of_birth"]
+                confidences["date_of_birth"], confidences["date_of_accident"] = confidences["date_of_accident"], confidences["date_of_birth"]
+        except ValueError:
+            pass
+
     suggestions["confidence_scores"] = confidences
 
     return suggestions
