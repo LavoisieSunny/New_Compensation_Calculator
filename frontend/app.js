@@ -729,7 +729,10 @@ document.addEventListener("DOMContentLoaded", () => {
         if (suggestions.confidence_scores) {
             Object.keys(suggestions.confidence_scores).forEach(key => {
                 const confObj = suggestions.confidence_scores[key];
-                const confidence = confObj.confidence;
+                let confidence = confObj.confidence;
+                if (confidence <= 1.0 && confidence > 0) {
+                    confidence = Math.round(confidence * 100);
+                }
                 const domId = fieldMapping[key];
                 if (domId) {
                     const inputEl = document.getElementById(domId);
@@ -871,6 +874,53 @@ document.addEventListener("DOMContentLoaded", () => {
         } else if (summaryCard) {
             summaryCard.classList.add("hidden-section");
             summaryCard.classList.remove("show");
+        }
+        
+        // Update Compensation Table Card
+        const tableCard = document.getElementById("compensation-table-card");
+        const tableBody = document.getElementById("compensation-table-body");
+        
+        if (tableCard && tableBody) {
+            const tableData = suggestions.compensation_table;
+            if (tableData && Object.keys(tableData).length > 0) {
+                let html = '<div class="extracted-table-container">';
+                let total = 0.0;
+                
+                Object.keys(tableData).forEach(head => {
+                    const amt = tableData[head];
+                    total += amt;
+                    html += `
+                        <div class="extracted-table-row">
+                            <span class="extracted-table-head">${head}</span>
+                            <span class="extracted-table-amount">Rs. ${amt.toLocaleString('en-IN')}</span>
+                        </div>
+                    `;
+                });
+                
+                // Add Reconstructed Total Row
+                html += `
+                    <div class="extracted-table-row total-row">
+                        <span class="extracted-table-head">Reconstructed Award Total</span>
+                        <span class="extracted-table-amount">Rs. ${total.toLocaleString('en-IN')}</span>
+                    </div>
+                `;
+                html += '</div>';
+                
+                tableBody.innerHTML = html;
+                tableCard.classList.remove("hidden-section");
+                tableCard.classList.add("show");
+            } else {
+                tableCard.classList.add("hidden-section");
+                tableCard.classList.remove("show");
+            }
+        }
+        
+        // Judicial System Badge Display
+        if (suggestions.is_tamil_nadu) {
+            const badgeId = "tn-mact-badge";
+            if (!document.getElementById(badgeId) && singlePreviewFilename) {
+                singlePreviewFilename.innerHTML += ` <span id="${badgeId}" class="badge source-badge" style="margin-left: 8px; background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; display: inline-block;">Judicial System (${suggestions.mcop_number || 'MCOP'})</span>`;
+            }
         }
         
         alert(`Auto-filled workstation variables successfully! DOB and accident dates converted.`);
@@ -1369,6 +1419,21 @@ document.addEventListener("DOMContentLoaded", () => {
                     <div class="empty-summary-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; opacity: 0.5; padding: 20px 0;">
                         <i class="fa-solid fa-gavel" style="font-size: 2.5rem; color: #c084fc;"></i>
                         <p style="font-size: 0.8rem; color: var(--text-secondary); text-align: center; margin: 0;">Upload a PDF to see the structured legal analysis summary and judicial anomaly checklist.</p>
+                    </div>
+                `;
+            }
+        }
+        
+        const tableCard = document.getElementById("compensation-table-card");
+        if (tableCard) {
+            tableCard.classList.add("hidden-section");
+            tableCard.classList.remove("show");
+            const tableBody = document.getElementById("compensation-table-body");
+            if (tableBody) {
+                tableBody.innerHTML = `
+                    <div class="empty-table-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; opacity: 0.5; padding: 20px 0;">
+                        <i class="fa-solid fa-table-list" style="font-size: 2.5rem; color: #34d399;"></i>
+                        <p style="font-size: 0.8rem; color: var(--text-secondary); text-align: center; margin: 0;">Upload a PDF to view the detailed breakdown of the judicial award heads.</p>
                     </div>
                 `;
             }

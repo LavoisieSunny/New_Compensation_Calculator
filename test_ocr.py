@@ -14,28 +14,36 @@ def create_mock_scan(output_path="test_scan.png"):
     """
     print(f"Creating mock claim document scan at: {output_path}...")
     
-    # 800x400 image, white background
-    img = Image.new('RGB', (800, 400), color=(255, 255, 255))
+    # 800x800 image, white background to fit more lines cleanly
+    img = Image.new('RGB', (800, 800), color=(255, 255, 255))
     d = ImageDraw.Draw(img)
     
     # Write sample lines in high-contrast black
     lines = [
-        "BEFORE THE MOTOR ACCIDENT CLAIMS TRIBUNAL, JABALPUR",
-        "M.A.C.T. Case No. 405 of 2024",
+        "BEFORE THE MOTOR ACCIDENTS CLAIMS TRIBUNAL, CHENNAI",
+        "M.C.O.P. No. 1205 of 2021",
         "Claimant Name: Shri Rajesh Kumar Sharma",
-        "S/o Shri Om Prakash Sharma, Resident of Jabalpur",
+        "S/o Shri Om Prakash Sharma, Resident of Chennai, Tamil Nadu",
         "Date of Birth of Injured: 12-04-1992 (Age: 32)",
-        "Date of Accident: 15-10-2024",
+        "Date of Accident: 12-05-2022",
         "Monthly Income: Earns Rs. 25000 per month from private service",
         "Permanent Disability: 40% permanent disability in left leg",
         "Number of dependents: 3 family members",
-        "Marital Status: Married"
+        "Marital Status: Married",
+        "The Tribunal hereby awards a total compensation of Rs. 4,57,240/- as award amount.",
+        "Award Section:",
+        "1. Disability Compensation : Rs. 2,00,000/-",
+        "2. Pain and suffering : Rs. 40,000/-",
+        "3. Loss of amenities : Rs. 30,000/-",
+        "4. Transportation charges : Rs. 15,000/-",
+        "5. Extra nourishment : Rs. 15,000/-",
+        "6. Attender charges : Rs. 15,000/-"
     ]
     
     y = 20
     for line in lines:
         d.text((40, y), line, fill=(0, 0, 0))
-        y += 35
+        y += 38
         
     img.save(output_path)
     print("Mock document scan created successfully!")
