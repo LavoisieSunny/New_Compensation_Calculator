@@ -158,7 +158,6 @@ def preprocess_image_safe(pil_img, resize_factor=None):
     Safe preprocessing pipeline for high-clarity legal documents.
     Pipeline:
     - Grayscale
-    - Auto-resize based on input dimensions (target width ~2500px to 3000px if low resolution)
     - Mild bilateral filter for noise removal (preserving text edges)
     - Mild CLAHE (clipLimit=1.5, tileGridSize=(8, 8))
     - Light sharpening only
@@ -174,30 +173,14 @@ def preprocess_image_safe(pil_img, resize_factor=None):
         else:
             gray = open_cv_image.copy()
 
-        # 2. Determine intelligent resize factor
-        h, w = gray.shape[:2]
-        if resize_factor is None:
-            if w < 1200:
-                resize_factor = 2.0
-            elif w < 800:
-                resize_factor = 3.0
-            else:
-                resize_factor = 1.0 # Already high DPI, do not resize to avoid memory blowup
+        # 2. Bilateral filter (mild denoising)
+        denoised = cv2.bilateralFilter(gray, 5, 50, 50)
 
-        if resize_factor != 1.0:
-            new_h, new_w = int(h * resize_factor), int(w * resize_factor)
-            resized = cv2.resize(gray, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-        else:
-            resized = gray
-
-        # 3. Bilateral filter (mild denoising)
-        denoised = cv2.bilateralFilter(resized, 5, 50, 50)
-
-        # 4. Mild CLAHE
+        # 3. Mild CLAHE
         clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
         enhanced = clahe.apply(denoised)
 
-        # 5. Light sharpening
+        # 4. Light sharpening
         blurred = cv2.GaussianBlur(enhanced, (0, 0), 2.0)
         sharpened = cv2.addWeighted(enhanced, 1.2, blurred, -0.2, 0)
 
@@ -221,9 +204,9 @@ def preprocess_image_enhanced(pil_img):
 
 def render_pdf_page_high_dpi(pdf_path: str, page_idx: int):
     """
-    Renders a specific page of a PDF at 400 DPI.
+    Renders a specific page of a PDF at 220 DPI.
     Attempts to use pdf2image (convert_from_path) first.
-    If pdf2image or poppler is missing, falls back to pypdfium2 with scale=5.56 (~400 DPI).
+    If pdf2image or poppler is missing, falls back to pypdfium2 with scale=3.0 (~220 DPI).
     """
     from PIL import Image
     try:
@@ -231,27 +214,27 @@ def render_pdf_page_high_dpi(pdf_path: str, page_idx: int):
         # convert_from_path uses 1-based page indices
         pages = convert_from_path(
             pdf_path,
-            dpi=400,
+            dpi = 220,
             fmt="png",
             first_page=page_idx + 1,
             last_page=page_idx + 1
         )
         if pages:
-            logger.info(f"Page {page_idx+1} rendered at 400 DPI using pdf2image.")
+            logger.info(f"Page {page_idx+1} rendered at 220 DPI using pdf2image.")
             return pages[0]
     except Exception as e:
         logger.warning(
             f"pdf2image high-DPI rendering failed or poppler not available: {str(e)}. "
-            f"Falling back to high-resolution pypdfium2 rendering at scale=5.56."
+            f"Falling back to high-resolution pypdfium2 rendering at scale=3.0."
         )
     
-    # Fallback using pypdfium2 at scale = 5.56 (400 DPI / 72 points per inch)
+    # Fallback using pypdfium2 at scale = 3.0 (220 DPI / 72 points per inch = 3.05)
     try:
         import pypdfium2 as pdfium
         doc = pdfium.PdfDocument(pdf_path)
         page = doc[page_idx]
-        bitmap = page.render(scale=5.56)
-        logger.info(f"Page {page_idx+1} rendered at 400 DPI using pypdfium2 fallback.")
+        bitmap = page.render(scale=3.0)
+        logger.info(f"Page {page_idx+1} rendered at 220 DPI using pypdfium2 fallback.")
         return bitmap.to_pil()
     except Exception as ex:
         logger.error(f"Failed to render page {page_idx+1} with high-DPI fallback: {str(ex)}")
