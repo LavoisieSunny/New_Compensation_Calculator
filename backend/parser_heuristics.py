@@ -772,12 +772,13 @@ def parse_extracted_text(text_lines):
         enhancement_reduction_request = "enhancement"
         conf_enhancement = 0.90
 
-    # Case Type classification
-    death_kws = ["death", "deceased", "fatal", "died on", "funeral", "consortium"]
-    injury_kws = ["injury", "injured", "treatment", "disability", "medical expenses"]
+    # Case Type classification — require a clear margin to prevent false death classification
+    death_kws = ["death", "deceased", "fatal", "died on", "funeral expenses", "loss of dependency"]
+    injury_kws = ["injury", "injured", "treatment", "disability", "medical expenses", "permanent disability"]
     death_score = sum(3 for kw in death_kws if kw in section_blocks["petitioner_details"].lower()) + sum(1 for kw in death_kws if kw in full_text_lower)
     injury_score = sum(3 for kw in injury_kws if kw in section_blocks["petitioner_details"].lower()) + sum(1 for kw in injury_kws if kw in full_text_lower)
-    case_type = "death" if death_score > injury_score else "injury"
+    # Fix 2: Require margin >= 2 before classifying as death case; ties default to injury
+    case_type = "death" if (death_score - injury_score) >= 2 else "injury"
 
     # ======================================================
     # LAYER 3 — LEGAL HEURISTICS ENGINE & NORMALIZATION
@@ -810,11 +811,14 @@ def parse_extracted_text(text_lines):
     if not compensation_table:
         compensation_table = parse_compensation_table(section_blocks["compensation_paragraphs"])
 
-    # Identify Tamil Nadu MACT specifics
-    is_tamil_nadu = False
-    tn_keywords = ["madras", "high court of madras", "chennai", "coimbatore", "madurai", "salem", "trichy", "pondicherry", "m.c.o.p", "mcop", "tribunal, tamil nadu"]
-    if any(kw in full_text_lower for kw in tn_keywords):
-        is_tamil_nadu = True
+    # Fix 4: Identify Tamil Nadu MACT specifics — strict two-signal requirement to avoid false triggers
+    # Signal A: MCOP case number style
+    tn_mcop_signal = bool(re.search(r'\bm\.?c\.?o\.?p\.?\b', full_text_lower))
+    # Signal B: Explicit TN city or court reference
+    tn_city_keywords = ["high court of madras", "chennai", "coimbatore", "madurai", "salem", "trichy", "pondicherry", "tribunal, tamil nadu", "madras high court"]
+    tn_city_signal = any(kw in full_text_lower for kw in tn_city_keywords)
+    # Both signals must be present (MCOP alone is insufficient)
+    is_tamil_nadu = tn_mcop_signal and tn_city_signal
         
     mcop_number = ""
     tn_disability_compensation = 0.0
@@ -880,31 +884,99 @@ def parse_extracted_text(text_lines):
         except ValueError:
             pass
 
+    # Fix 1 & 6: Functional Disability Validator + Legal Reasoning Validator
+    # has_functional_disability: True only when judgment links disability to earning capacity
+    functional_disability_keywords = [
+        "loss of earning capacity", "inability to work", "unable to continue", "reduced earning",
+        "loss of future earning", "functional disability", "earning capacity reduced",
+        "affecting earning", "loss of earning ability", "multiplier method"
+    ]
+    has_functional_disability = bool(disability) and any(kw in full_text_lower for kw in functional_disability_keywords)
+
+    # Legal Reasoning Validator — must be present for any multiplier-based reconstruction
+    reconstruction_keywords = [
+        "loss of future income", "future income loss", "earning capacity", "earning capacity reduction",
+        "affecting earning", "loss of earning capacity", "multiplier method", "future prospects",
+        "sarla verma", "pranay sethi", "loss of dependency", "dependency loss"
+    ]
+    can_reconstruct = any(kw in full_text_lower for kw in reconstruction_keywords)
+    
+    # Fix 1 + 2: Compensation Mode Detection — now uses has_functional_disability to prevent medical-only disability from triggering multiplier mode
+    compensation_mode = "simple_injury_award"
+    if case_type == "death":
+        compensation_mode = "death_case_formula"
+    else:
+        # Injury case — permanent_disability_formula ONLY if earning capacity is legally established
+        if disability and has_functional_disability:
+            compensation_mode = "permanent_disability_formula"
+        elif any(kw in full_text_lower for kw in ["lump sum", "lumpsum", "consolidated", "globally"]):
+            compensation_mode = "lump_sum_award"
+        else:
+            compensation_mode = "simple_injury_award"
+
     # Math calculations balance validation check
     reconstruction_triggered = False
     reconstructed_compensation = 0.0
-    if monthly_income and age:
+    
+    reconstruction_trigger_reason = "can_reconstruct=False (no explicit legal discussion)"
+
+    if monthly_income and age and can_reconstruct:
         try:
             inc_val = float(monthly_income)
-            pros_pct = float(future_prospect) if future_prospect else expected_prospects
             mult_val = int(multiplier) if multiplier else expected_multiplier
-            
-            enhanced_monthly = inc_val * (1 + pros_pct / 100)
-            annual_inc = enhanced_monthly * 12
-            
-            dep_cnt = int(dependents) if dependents else 3
-            deduct_pct = 0.50 if marital_status == "single" or dep_cnt <= 1 else 0.33
-            
-            loss_of_dependency = annual_inc * (1 - deduct_pct) * mult_val
-            reconstructed_compensation = loss_of_dependency + consortium + funeral_expenses + estate_loss
-            
-            if total_compensation:
+
+            if compensation_mode == "death_case_formula":
+                # Fix 2: Death benefits ONLY in death cases
+                pros_pct = float(future_prospect) if future_prospect else expected_prospects
+                enhanced_monthly = inc_val * (1.0 + pros_pct / 100.0)
+                annual_inc = enhanced_monthly * 12.0
+                dep_cnt = int(dependents) if dependents else 3
+                if marital_status == "single":
+                    deduct_pct = 0.50
+                elif dep_cnt <= 1:
+                    deduct_pct = 0.50
+                elif dep_cnt <= 3:
+                    deduct_pct = 1.0 / 3.0
+                elif dep_cnt <= 6:
+                    deduct_pct = 0.25
+                else:
+                    deduct_pct = 0.20
+                family_contribution = annual_inc * (1.0 - deduct_pct)
+                loss_of_dependency = family_contribution * mult_val
+                # Death-specific benefits only
+                reconstructed_compensation = loss_of_dependency + consortium + funeral_expenses + estate_loss
+                reconstruction_trigger_reason = f"death_case_formula: loss_dep={int(loss_of_dependency)}, consortium={consortium}, funeral={funeral_expenses}"
+
+            elif compensation_mode == "permanent_disability_formula":
+                # Fix 1: Injury formula — NO future prospects, NO consortium/funeral/estate
+                annual_inc = inc_val * 12.0
+                dis_pct = float(disability) if disability else 0.0
+                future_income_loss = annual_inc * (dis_pct / 100.0) * mult_val
+                # Fetch actual injury heads from parsed table; no death benefits
+                med_exp = float(compensation_table.get("Medical Expenses", compensation_table.get("Disability Compensation", 0.0)))
+                pain_suf = float(compensation_table.get("Pain And Suffering", 0.0))
+                trans = float(compensation_table.get("Transportation Charges", 0.0))
+                diet = float(compensation_table.get("Extra Nourishment", 0.0))
+                attender = float(compensation_table.get("Attender Charges", 0.0))
+                loss_inc = float(compensation_table.get("Loss Of Income", 0.0))
+                reconstructed_compensation = future_income_loss + med_exp + pain_suf + trans + diet + attender + loss_inc
+                reconstruction_trigger_reason = f"permanent_disability_formula: future_income_loss={int(future_income_loss)}, dis={dis_pct}%, mult={mult_val}"
+
+            if total_compensation and reconstructed_compensation > 0:
                 diff = abs(total_compensation - reconstructed_compensation) / total_compensation
                 if diff > 0.05:
                     reconstruction_triggered = True
-                    anomalies_detected.append(f"Compensation mismatch detected: Tribunal Award Rs. {int(total_compensation):,} vs Reconstructed Math Rs. {int(reconstructed_compensation):,}.")
+                    anomalies_detected.append(
+                        f"Compensation mismatch detected: Tribunal Award Rs. {int(total_compensation):,} vs Reconstructed Math Rs. {int(reconstructed_compensation):,}."
+                    )
         except Exception as e:
             logger.error(f"Validation math error: {str(e)}")
+
+    # Simple injury/lump sum award: default reconstructed amount to parsed table sum
+    if reconstructed_compensation <= 0:
+        table_sum = sum(compensation_table.values()) if compensation_table else 0.0
+        if table_sum > 0:
+            reconstructed_compensation = table_sum
 
     # ======================================================
     # LAYER 4 — FALLBACK AI RECOVERY (Semantic context-aware)
@@ -946,7 +1018,8 @@ def parse_extracted_text(text_lines):
             conf_dependents = 0.85
             sec_dependents = "AI Recovery"
             
-        if (not total_compensation or total_compensation <= 0 or reconstruction_triggered) and recovered.get("award_amount"):
+        # Prioritize parsed total_compensation (Step 3)
+        if (not total_compensation or total_compensation <= 0 or conf_total_compensation < 0.70) and recovered.get("award_amount"):
             total_compensation = recovered["award_amount"]
             conf_total_compensation = 0.85
             sec_total_compensation = "AI Recovery"
@@ -1004,10 +1077,52 @@ def parse_extracted_text(text_lines):
                     sec_prayer = "raw_ocr"
                     break
 
-        if (not total_compensation or total_compensation <= 0 or reconstruction_triggered) and reconstructed_compensation > 0:
+        # Step 7: Excess Math Safeguards (3x limit check)
+        excessive_deviation = False
+        if total_compensation and reconstructed_compensation > 0:
+            ratio = float(reconstructed_compensation) / float(total_compensation)
+            if ratio > 3.0 or ratio < (1.0 / 3.0):
+                excessive_deviation = True
+                logger.warning(f"Excessive math deviation: Reconstructed {reconstructed_compensation} vs Tribunal {total_compensation}.")
+                anomalies_detected.append(
+                    f"Excessive math deviation: Reconstructed formula (Rs. {int(reconstructed_compensation):,}) is >3x or <1/3x of Tribunal Award (Rs. {int(total_compensation):,})."
+                )
+
+        # Reconstruct total compensation ONLY when missing OR if the extracted award is extremely low confidence (< 0.70)
+        # AND make sure we don't overwrite if there's an excessive deviation (Step 7)
+        if (not total_compensation or total_compensation <= 0 or (conf_total_compensation < 0.70 and not excessive_deviation)) and reconstructed_compensation > 0:
             total_compensation = round(reconstructed_compensation, 2)
             conf_total_compensation = 0.80
             sec_total_compensation = "compensation_paragraphs"
+
+        if excessive_deviation:
+            # Fix 3: Prefer tribunal award and reduce confidence to highlight anomaly
+            conf_total_compensation = min(conf_total_compensation, 0.60)
+            reconstruction_trigger_reason = f"excessive_deviation_clamped: ratio={round(float(reconstructed_compensation)/float(total_compensation) if total_compensation else 0, 2)}"
+
+    # Fix 6: Expand _debug with legal observability fields
+    award_validation_ratio = 0.0
+    if total_compensation and reconstructed_compensation > 0:
+        try:
+            award_validation_ratio = round(float(reconstructed_compensation) / float(total_compensation), 3)
+        except Exception:
+            pass
+
+    parser_debug["_meta"] = {
+        "functional_disability_detected": has_functional_disability,
+        "can_reconstruct": can_reconstruct,
+        "compensation_mode": compensation_mode,
+        "reconstruction_trigger_reason": reconstruction_trigger_reason,
+        "reconstruction_triggered": reconstruction_triggered,
+        "award_validation_ratio": award_validation_ratio,
+        "section_confidence": {
+            "petitioner_details": round(len(section_blocks.get('petitioner_details','')) / max(len(full_text), 1), 3),
+            "compensation_paragraphs": round(len(section_blocks.get('compensation_paragraphs','')) / max(len(full_text), 1), 3),
+            "award_section": round(len(section_blocks.get('award_section','')) / max(len(full_text), 1), 3)
+        },
+        "is_tamil_nadu": is_tamil_nadu,
+        "tn_signals": {"mcop": tn_mcop_signal, "city": tn_city_signal} if is_tamil_nadu else {"mcop": tn_mcop_signal, "city": tn_city_signal}
+    }
 
     # Citation precedents collector
     citation_patterns = [
@@ -1082,6 +1197,7 @@ def parse_extracted_text(text_lines):
     # ======================================================
     suggestions = {
         "case_type": case_type,
+        "compensation_mode": compensation_mode,
         "name": claimant_name or deceased_name,
         "father_name": father_name,
         "date_of_accident": date_of_accident,
