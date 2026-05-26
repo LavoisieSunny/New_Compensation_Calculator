@@ -95,6 +95,120 @@ def merge_ocr_lines_to_paragraphs(text_lines):
     return merged_blocks
 
 
+def clean_legal_name(name_str):
+    """
+    Step 3 — Name Cleaning:
+    Removes legal prefixes (Shri, Smt, Mr, Mrs, Kumari, Late) and normalizes spacing/quotes.
+    """
+    if not name_str:
+        return ""
+    # Strip whitespace and common noise characters
+    name_str = name_str.strip()
+    name_str = re.sub(r'^[\"\’\‘\“\”\s\.\,\-\/]+|[\"\’\‘\“\”\s\.\,\-\/]+$', '', name_str)
+    
+    # Remove standard titles with case-insensitive word boundaries
+    prefixes = [r'\bshri\b', r'\bsmt\b', r'\bmr\b', r'\bmrs\b', r'\bkumari\b', r'\blate\b']
+    for pref in prefixes:
+        name_str = re.sub(pref, '', name_str, flags=re.IGNORECASE)
+        
+    # Remove relationship fragments if they leaked
+    name_str = re.sub(r'[\s,\-]+(?:s/o|d/o|w/o|son of|daughter of|wife of).*$', '', name_str, flags=re.IGNORECASE)
+    
+    # Normalize spaces
+    name_str = re.sub(r'\s+', ' ', name_str).strip()
+    return name_str
+
+
+def extract_relationship_entities(text):
+    """
+    Step 4 — Relationship-Aware Entity Splitting:
+    Intelligently splits "Claimant Name, S/o Father Name" into claimant_name and father_name,
+    applying strict truncation boundaries on each component separately.
+    """
+    if not text:
+        return None
+        
+    rel_patterns = [
+        (r'(.*?)\b(?:s/o|son\s+of)\b\s*(?:shri)?\s*(.*)', "Son of"),
+        (r'(.*?)\b(?:d/o|daughter\s+of)\b\s*(?:shri|smt)?\s*(.*)', "Daughter of"),
+        (r'(.*?)\b(?:w/o|wife\s+of)\b\s*(?:shri)?\s*(.*)', "Wife of")
+    ]
+    
+    for pat, rel_type in rel_patterns:
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            c_part = m.group(1).strip()
+            f_part = m.group(2).strip()
+            
+            # Strip typical claimant/petitioner label prefixes from the claimant part
+            c_part = re.sub(r'^(?:claimant\s+name|petitioner\s+name|name\s+of\s+injured|name\s+of\s+claimant|name\s+of\s+victim|claimant|petitioner|victim|injured|name)\s*[:\-–\s]+', '', c_part, flags=re.IGNORECASE)
+            
+            # Apply boundary truncation to the father part specifically to avoid leaking trailing fields
+            stop_labels = [
+                "date of birth", "dob", "d.o.b", "born on", "age", "aged",
+                "occupation", "employed as", "working as", "monthly income", "salary",
+                "income", "disability", "dependents", "address", "resident of", "marital status"
+            ]
+            
+            # 1. Truncate at comma
+            comma_pos = f_part.find(",")
+            if comma_pos != -1:
+                f_part = f_part[:comma_pos]
+                
+            # 2. Truncate at newline
+            newline_pos = re.search(r'[\r\n]', f_part)
+            if newline_pos:
+                f_part = f_part[:newline_pos.start()]
+                
+            # 3. Truncate at Date pattern
+            date_pos = re.search(r'\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4}\b', f_part)
+            if date_pos:
+                f_part = f_part[:date_pos.start()]
+                
+            # 4. Truncate at stop labels
+            for sl in stop_labels:
+                sl_match = re.search(r'\b' + re.escape(sl) + r'\b', f_part, re.IGNORECASE)
+                if sl_match:
+                    f_part = f_part[:sl_match.start()]
+                    
+            c_clean = clean_legal_name(c_part)
+            f_clean = clean_legal_name(f_part)
+            
+            if c_clean and f_clean:
+                return c_clean, rel_type, f_clean
+                
+    return None
+
+
+def validate_name_confidence(name, current_confidence):
+    """
+    Step 5 — Confidence Validation:
+    Automatically reduces confidence to <= 0.3 if the name contains digit patterns,
+    other field keywords, or punctuation overflow (e.g. >= 3 separators).
+    """
+    if not name:
+        return current_confidence
+        
+    name_lower = name.lower()
+    
+    # 1. Check for bad keywords
+    bad_keywords = ["date", "age", "income", "salary", "disability", "occupation", "dependents", "address"]
+    contains_bad_kw = any(kw in name_lower for kw in bad_keywords)
+    
+    # 2. Check for digits
+    contains_digits = bool(re.search(r'\d', name))
+    
+    # 3. Check for punctuation overflow (>= 3 chars)
+    punc_matches = re.findall(r'[.,:\-/\_\\]', name)
+    overflow_punc = len(punc_matches) >= 3
+    
+    if contains_bad_kw or contains_digits or overflow_punc:
+        logger.warning(f"Confidence validation failed for name '{name}' (bad kw: {contains_bad_kw}, digits: {contains_digits}, punc: {overflow_punc}). Dropping confidence.")
+        return min(current_confidence, 0.30)
+        
+    return current_confidence
+
+
 def parse_indian_rupee_value(text):
     """
     Parses and normalises Indian currency text, converting Lakhs, Crores, commas, and suffixes into float.
@@ -173,32 +287,113 @@ def parse_compensation_table(text):
     return table
 
 
-def contextual_extract(patterns, sections, priority_list, type_cast=str, default_val=None):
+def contextual_extract(patterns, sections, priority_list, type_cast=str, default_val=None, field_name=None, debug_info=None):
     """
-    Layer 2: Contextual Entity Extraction.
+    Layer 2: Upgraded Contextual Entity Extraction with strict field-boundary rules.
     Searches only within prioritized legal sections using specific anchor words.
     Returns (value, confidence_float, source_section).
     """
+    # Step 1: Strict stop labels list
+    STOP_LABELS = [
+        "date of birth", "dob", "d.o.b", "born on",
+        "age", "aged",
+        "occupation", "employed as", "working as",
+        "monthly income", "salary", "earning", "income",
+        "disability", "permanent disability",
+        "dependents", "no. of dependents",
+        "address", "resident of",
+        "marital status",
+        "prayer", "relief",
+        "award", "awarded",
+        # Relationship boundaries
+        "s/o", "d/o", "w/o", "son of", "daughter of", "wife of"
+    ]
+    
+    if debug_info is None:
+        debug_info = {}
+        
     for sec_name, base_weight in priority_list:
         text = sections.get(sec_name, "")
         if not text:
             continue
             
         for pat in patterns:
-            is_name = "name" in pat.lower() or "deceased" in pat.lower() or "claimant" in pat.lower()
-            search_text = text if is_name else text.lower()
-            
-            m = re.search(pat, search_text)
+            # Step 2: Use broad capture with safe case-insensitive search on raw-cased text
+            m = re.search(pat, text, re.IGNORECASE)
             if m:
+                matched_source = m.group(0)
                 raw_val = m.group(1).strip()
-                raw_val = re.sub(r'\s+', ' ', raw_val).strip()
                 
+                # Filter out stop labels that are part of the pattern or field parameters to prevent self-truncation
+                active_stop_labels = []
+                for sl in STOP_LABELS:
+                    if field_name == "father_name" and sl in ["s/o", "d/o", "w/o", "son of", "daughter of", "wife of"]:
+                        continue
+                    active_stop_labels.append(sl)
+                    
+                # Strict boundary truncation logic (Step 1 & Step 2)
+                truncated_val = raw_val
+                stop_token_triggered = "None (EOL/EOF)"
+                
+                is_text_field = (type_cast == str) and field_name in ["claimant_name", "deceased_name", "father_name", "occupation", "address"]
+                
+                # 1. Truncate at Comma for text name/occupation fields
+                if is_text_field:
+                    comma_pos = truncated_val.find(",")
+                    if comma_pos != -1:
+                        truncated_val = truncated_val[:comma_pos]
+                        stop_token_triggered = ", (comma)"
+                        
+                # 2. Truncate at Newline
+                newline_pos = re.search(r'[\r\n]', truncated_val)
+                if newline_pos:
+                    truncated_val = truncated_val[:newline_pos.start()]
+                    stop_token_triggered = "Newline boundary"
+                    
+                # 3. Truncate at Date Pattern
+                date_pos = re.search(r'\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4}\b', truncated_val)
+                if date_pos:
+                    truncated_val = truncated_val[:date_pos.start()]
+                    stop_token_triggered = f"Date pattern ({date_pos.group(0)})"
+                    
+                # 4. Truncate at Stop Labels
+                for sl in active_stop_labels:
+                    sl_match = re.search(r'\b' + re.escape(sl) + r'\b', truncated_val, re.IGNORECASE)
+                    if sl_match:
+                        if sl_match.start() < len(truncated_val):
+                            truncated_val = truncated_val[:sl_match.start()]
+                            stop_token_triggered = f"Stop label '{sl}'"
+                            
+                # 5. Truncate at Numeric metadata boundaries
+                if is_text_field:
+                    num_meta_match = re.search(r'\b\d+\s*(?:years|yrs|percent|%|\b)', truncated_val, re.IGNORECASE)
+                    if num_meta_match:
+                        truncated_val = truncated_val[:num_meta_match.start()]
+                        stop_token_triggered = f"Numeric metadata boundary ({num_meta_match.group(0)})"
+                        
+                # Clean up spacing
+                final_val = re.sub(r'\s+', ' ', truncated_val).strip()
+                
+                # Step 3: Name cleaning for text fields
+                if is_text_field:
+                    final_val = clean_legal_name(final_val)
+                    
+                # Step 6: Record Debug Output
+                if field_name:
+                    debug_info[field_name] = {
+                        "matched_source_text": matched_source.strip(),
+                        "regex_used": pat,
+                        "stop_token_triggered": stop_token_triggered,
+                        "raw_captured": raw_val.strip(),
+                        "final_extracted": final_val
+                    }
+                    
                 if type_cast == float:
-                    val = parse_indian_rupee_value(raw_val)
+                    val = parse_indian_rupee_value(final_val)
                     if val > 0:
                         return val, round(base_weight / 100.0, 2), sec_name
                 elif type_cast == int:
-                    digit_match = re.search(r'\d+', raw_val)
+                    digit_match = re.search(r'\d+', final_val)
                     if digit_match:
                         try:
                             val = int(digit_match.group(0))
@@ -206,8 +401,11 @@ def contextual_extract(patterns, sections, priority_list, type_cast=str, default
                         except ValueError:
                             pass
                 else:
-                    if len(raw_val) > 2:
-                        return raw_val, round(base_weight / 100.0, 2), sec_name
+                    if len(final_val) > 2:
+                        # Step 5: Validate and reduce confidence if needed
+                        confidence = round(base_weight / 100.0, 2)
+                        confidence = validate_name_confidence(final_val, confidence)
+                        return final_val, confidence, sec_name
                         
     fallback_confidence = 0.40
     return default_val, fallback_confidence, "raw_ocr"
@@ -313,42 +511,74 @@ def parse_extracted_text(text_lines):
     # ======================================================
     # LAYER 2 — CONTEXTUAL ENTITY EXTRACTION
     # ======================================================
+    parser_debug = {}
     
-    # 1. Claimant Name
+    # 1. Claimant Name (Step 2: Bounded capture using (.*))
     claimant_patterns = [
-        r'(?:name\s+of\s+)?(?:injured|claimant|victim)\s*(?:name)?\s*:\s*([A-Za-z \t\.]{3,30})',
-        r'petitioner\s*(?:name)?\s*:\s*([A-Za-z \t\.]{3,30})',
-        r'\bshri\b\s*([A-Za-z \t\.]{3,30})'
+        r'(?:name\s+of\s+)?(?:injured|claimant|victim)\s*(?:name)?\s*[:\-]\s*(.*)',
+        r'petitioner\s*(?:name)?\s*[:\-]\s*(.*)',
+        r'\bshri\b\s*(.*)'
     ]
     claimant_priority = [("petitioner_details", 90), ("compensation_paragraphs", 75)]
     claimant_name, conf_claimant_name, sec_claimant_name = contextual_extract(
-        claimant_patterns, section_blocks, claimant_priority, type_cast=str
+        claimant_patterns, section_blocks, claimant_priority, type_cast=str,
+        field_name="claimant_name", debug_info=parser_debug
     )
     if claimant_name: claimant_name = claimant_name.title()
 
-    # 2. Deceased Name
+    # 2. Deceased Name (Step 2: Bounded capture using (.*))
     dec_patterns = [
-        r'(?:name\s+of\s+)?deceased\s*(?:name)?\s*:\s*([A-Za-z \t\.]{3,30})',
-        r'death\s+of\s+([A-Za-z \t\.]{3,30})',
-        r'late\s+shri\s+([A-Za-z \t\.]{3,30})'
+        r'(?:name\s+of\s+)?deceased\s*(?:name)?\s*[:\-]\s*(.*)',
+        r'death\s+of\s+(.*)',
+        r'late\s+shri\s+(.*)'
     ]
     dec_priority = [("petitioner_details", 90), ("compensation_paragraphs", 80)]
     deceased_name, conf_deceased_name, sec_deceased_name = contextual_extract(
-        dec_patterns, section_blocks, dec_priority, type_cast=str
+        dec_patterns, section_blocks, dec_priority, type_cast=str,
+        field_name="deceased_name", debug_info=parser_debug
     )
     if deceased_name: deceased_name = deceased_name.title()
 
-    # 3. Father / Husband Name
+    # 3. Father / Husband Name (Step 2: Bounded capture using (.*))
     father_patterns = [
-        r'(?:father|husband)\s*(?:s\s*)?name\s*:\s*([A-Za-z \t\.]{3,30})',
-        r'\bs\/o\b\s*(?:shri)?\s*([A-Za-z \t\.]{3,30})',
-        r'\bw\/o\b\s*(?:shri)?\s*([A-Za-z \t\.]{3,30})'
+        r'(?:father|husband)\s*(?:s\s*)?name\s*[:\-]\s*(.*)',
+        r'\bs\/o\b\s*(?:shri)?\s*(.*)',
+        r'\bw\/o\b\s*(?:shri)?\s*(.*)'
     ]
     father_priority = [("petitioner_details", 90)]
     father_name, conf_father_name, sec_father_name = contextual_extract(
-        father_patterns, section_blocks, father_priority, type_cast=str
+        father_patterns, section_blocks, father_priority, type_cast=str,
+        field_name="father_name", debug_info=parser_debug
     )
     if father_name: father_name = father_name.title()
+
+    # Step 4 — Relationship-Aware Entity Splitting:
+    # If claimant_name is found, let's scan the matched claimant line for inline relationship split
+    claimant_debug = parser_debug.get("claimant_name", {})
+    source_line = claimant_debug.get("matched_source_text", "")
+    if not source_line:
+        source_line = section_blocks["petitioner_details"]
+        
+    split_res = extract_relationship_entities(source_line)
+    if split_res:
+        c_split, rel_type, f_split = split_res
+        if c_split:
+            claimant_name = c_split.title()
+            conf_claimant_name = max(conf_claimant_name, 0.95)
+            if "claimant_name" in parser_debug:
+                parser_debug["claimant_name"]["final_extracted"] = claimant_name
+                parser_debug["claimant_name"]["stop_token_triggered"] = f"Relationship split '{rel_type}'"
+        if f_split and (not father_name or len(father_name) < 3 or "date" in father_name.lower()):
+            father_name = f_split.title()
+            conf_father_name = max(conf_father_name, 0.95)
+            sec_father_name = "petitioner_details"
+            parser_debug["father_name"] = {
+                "matched_source_text": source_line.strip(),
+                "regex_used": "Relationship split from Claimant",
+                "stop_token_triggered": f"Relationship split '{rel_type}'",
+                "raw_captured": f_split,
+                "final_extracted": father_name
+            }
 
     # 4. Age
     age_patterns = [
@@ -357,19 +587,21 @@ def parse_extracted_text(text_lines):
     ]
     age_priority = [("petitioner_details", 95), ("compensation_paragraphs", 90), ("dependency_analysis", 85)]
     age, conf_age, sec_age = contextual_extract(
-        age_patterns, section_blocks, age_priority, default_val="", type_cast=int
+        age_patterns, section_blocks, age_priority, default_val="", type_cast=int,
+        field_name="age", debug_info=parser_debug
     )
 
-    # 5. Occupation
+    # 5. Occupation (Step 2: Bounded capture using (.*))
     occ_patterns = [
-        r'occupation\s*:\s*([A-Za-z \t]{3,30})',
-        r'employed\s+as\s+([A-Za-z \t]{3,30})',
-        r'working\s+as\s+([A-Za-z \t]{3,30})',
-        r'earning\s+as\s+([A-Za-z \t]{3,30})'
+        r'occupation\s*[:\-]\s*(.*)',
+        r'employed\s+as\s+(.*)',
+        r'working\s+as\s+(.*)',
+        r'earning\s+as\s+(.*)'
     ]
     occ_priority = [("petitioner_details", 90), ("compensation_paragraphs", 80)]
     occupation, conf_occupation, sec_occupation = contextual_extract(
-        occ_patterns, section_blocks, occ_priority, default_val="", type_cast=str
+        occ_patterns, section_blocks, occ_priority, default_val="", type_cast=str,
+        field_name="occupation", debug_info=parser_debug
     )
     if occupation: occupation = occupation.title()
 
@@ -380,7 +612,8 @@ def parse_extracted_text(text_lines):
     ]
     income_priority = [("compensation_paragraphs", 95), ("petitioner_details", 90), ("award_section", 80)]
     monthly_income, conf_monthly_income, sec_monthly_income = contextual_extract(
-        income_patterns, section_blocks, income_priority, default_val="", type_cast=float
+        income_patterns, section_blocks, income_priority, default_val="", type_cast=float,
+        field_name="monthly_income", debug_info=parser_debug
     )
 
     # 7. Multiplier
@@ -391,7 +624,8 @@ def parse_extracted_text(text_lines):
     ]
     multiplier_priority = [("multiplier_calculations", 95), ("compensation_paragraphs", 90)]
     multiplier, conf_multiplier, sec_multiplier = contextual_extract(
-        multiplier_patterns, section_blocks, multiplier_priority, default_val="", type_cast=int
+        multiplier_patterns, section_blocks, multiplier_priority, default_val="", type_cast=int,
+        field_name="multiplier", debug_info=parser_debug
     )
 
     # 8. Future Prospects
@@ -401,35 +635,40 @@ def parse_extracted_text(text_lines):
     ]
     prospects_priority = [("future_prospects_section", 95), ("compensation_paragraphs", 90)]
     future_prospect, conf_future_prospect, sec_future_prospect = contextual_extract(
-        prospects_patterns, section_blocks, prospects_priority, default_val="", type_cast=float
+        prospects_patterns, section_blocks, prospects_priority, default_val="", type_cast=float,
+        field_name="future_prospect", debug_info=parser_debug
     )
 
-    # 9. Place of Accident
+    # 9. Place of Accident (Step 2: Bounded capture using (.*))
     place_regexes = [
-        r'place\s+of\s+(?:accident|occurrence)\s*[:\-]\s*([A-Za-z0-9 \t\.\,\-\/]{3,60})',
-        r'accident\s+(?:occurred|took\s+place)\s+at\s+([A-Za-z0-9 \t\.\,\-\/]{3,60})',
-        r'accident\s+near\s+([A-Za-z0-9 \t\.\,\-\/]{3,60})'
+        r'place\s+of\s+(?:accident|occurrence)\s*[:\-]\s*(.*)',
+        r'accident\s+(?:occurred|took\s+place)\s+at\s+(.*)',
+        r'accident\s+near\s+(.*)'
     ]
     place_priority = [("petitioner_details", 95), ("raw_ocr", 40)]
     place_of_accident, conf_place_of_accident, sec_place_of_accident = contextual_extract(
-        place_regexes, section_blocks, place_priority, default_val="", type_cast=str
+        place_regexes, section_blocks, place_priority, default_val="", type_cast=str,
+        field_name="place_of_accident", debug_info=parser_debug
     )
     if place_of_accident: place_of_accident = place_of_accident.title()
 
     # 10. Consortium, Funeral & Estate
     cons_patterns = [r'consortium\s*(?:of)?\s*(?:rs\.?|inr)?\s*(\d{4,6})\b']
     consortium, conf_consortium, sec_consortium = contextual_extract(
-        cons_patterns, section_blocks, [("compensation_paragraphs", 95)], default_val=40000.0, type_cast=float
+        cons_patterns, section_blocks, [("compensation_paragraphs", 95)], default_val=40000.0, type_cast=float,
+        field_name="consortium", debug_info=parser_debug
     )
 
     fun_patterns = [r'funeral\s*(?:expenses)?\s*(?:of)?\s*(?:rs\.?|inr)?\s*(\d{4,6})\b']
     funeral_expenses, conf_funeral_expenses, sec_funeral_expenses = contextual_extract(
-        fun_patterns, section_blocks, [("compensation_paragraphs", 95)], default_val=15000.0, type_cast=float
+        fun_patterns, section_blocks, [("compensation_paragraphs", 95)], default_val=15000.0, type_cast=float,
+        field_name="funeral_expenses", debug_info=parser_debug
     )
 
     est_patterns = [r'(?:loss\s+of\s+)?estate\s*(?:of)?\s*(?:rs\.?|inr)?\s*(\d{4,6})\b']
     estate_loss, conf_estate_loss, sec_estate_loss = contextual_extract(
-        est_patterns, section_blocks, [("compensation_paragraphs", 95)], default_val=15000.0, type_cast=float
+        est_patterns, section_blocks, [("compensation_paragraphs", 95)], default_val=15000.0, type_cast=float,
+        field_name="estate_loss", debug_info=parser_debug
     )
 
     # 11. Disability
@@ -439,7 +678,8 @@ def parse_extracted_text(text_lines):
     ]
     dis_priority = [("compensation_paragraphs", 95), ("petitioner_details", 90)]
     disability, conf_disability, sec_disability = contextual_extract(
-        disability_patterns, section_blocks, dis_priority, default_val="", type_cast=float
+        disability_patterns, section_blocks, dis_priority, default_val="", type_cast=float,
+        field_name="disability", debug_info=parser_debug
     )
 
     # 12. Dependents & Marital Status
@@ -449,7 +689,8 @@ def parse_extracted_text(text_lines):
         r'\bnumber\s*of\s*dependents?\s*(?:is|:)?\s*(\d{1,2})\b'
     ]
     dependents, conf_dependents, sec_dependents = contextual_extract(
-        dependents_patterns, section_blocks, [("dependency_analysis", 95), ("petitioner_details", 90)], default_val="", type_cast=int
+        dependents_patterns, section_blocks, [("dependency_analysis", 95), ("petitioner_details", 90)], default_val="", type_cast=int,
+        field_name="dependents", debug_info=parser_debug
     )
 
     marital_status = "married"
@@ -871,6 +1112,9 @@ def parse_extracted_text(text_lines):
         "ai_recovery_triggered": ai_recovery_triggered,
         "legal_ai_summary": legal_ai_summary,
         "anomalies_detected": anomalies_detected,
+        
+        # Step 6: Detailed Debug Output
+        "_debug": parser_debug,
         
         # Step 9 Confidences nested structure: e.g. {"monthly_income": {"value": 15000, "confidence": 0.92, "source": "compensation_paragraphs"}}
         "confidence_scores": {
