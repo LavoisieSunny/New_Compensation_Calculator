@@ -179,7 +179,8 @@ def clean_legal_name(name_str):
         "insurance", "insur", "general", "company", "ltd", "limited", "corp", "corporation",
         "is assessed", "assessed at", "monthly income", "income is", "rs.", "rs ", "inr", "per month", "per annum",
         "died in", "died on", "accident occurred", "occurred at", "took place", "working as", "employed as", "earning", "wages", "salary",
-        "description", "particulars", "details of", "description of"
+        "description", "particulars", "details of", "description of",
+        "non-claimant", "non claimant", "owner", "driver"
     ]
     name_lower = name_str.lower()
     if any(kw in name_lower for kw in IGNORE_KEYWORDS):
@@ -340,7 +341,7 @@ def validate_name_confidence(name, current_confidence):
     name_lower = name.lower()
     
     # 1. Check for bad keywords
-    bad_keywords = ["date", "age", "income", "salary", "disability", "occupation", "dependents", "address"]
+    bad_keywords = ["date", "age", "income", "salary", "disability", "occupation", "dependents", "address", "non-claimant", "owner", "driver", "insurance", "respondent"]
     contains_bad_kw = any(kw in name_lower for kw in bad_keywords)
     
     # 2. Check for digits
@@ -1087,6 +1088,31 @@ def parse_extracted_text(text_lines):
     cause_title_page = 1
     cause_title_sec = "raw_ocr"
     
+    def determine_name_role(name, text):
+        if not name or len(name) < 3:
+            return "unknown"
+        name_esc = re.escape(name)
+        text_lower = text.lower()
+        
+        # Check if the name appears near Non-claimant or Claimant
+        for line in text.split("\n"):
+            line_lower = line.lower()
+            if name.lower() in line_lower:
+                if "non-claimant" in line_lower or "non claimant" in line_lower or "owner" in line_lower or "driver" in line_lower:
+                    return "non-claimant"
+                if "claimant" in line_lower or "petitioner" in line_lower:
+                    return "claimant"
+                    
+        for m in re.finditer(name_esc, text, re.IGNORECASE):
+            start = max(0, m.start() - 80)
+            end = min(len(text), m.end() + 80)
+            window = text[start:end].lower()
+            if "non-claimant" in window or "non claimant" in window or "owner" in window or "driver" in window:
+                return "non-claimant"
+            if "claimant" in window or "petitioner" in window:
+                return "claimant"
+        return "unknown"
+    
     # Search for Vs patterns in the first 5 pages of full_text
     top_pages_text = "\n".join(p["text"] for p in pages[:5]) if pages else full_text[:4000]
     for vs_pattern in [r'\bversus\b', r'\bvs\b\.?', r'\bv\b\.?']:
@@ -1113,32 +1139,60 @@ def parse_extracted_text(text_lines):
                     logger.info(f"Cause title extraction: found claimant '{cause_title_claimant}' after insurance company '{part1_clean}'")
                     break
                 elif part1_clean and len(part1_clean) > 2 and not is_ins:
-                    # If part1 is a person, they are likely the claimant/appellant
-                    cause_title_claimant = part1_clean
-                    cause_title_conf = 0.90
-                    cause_title_page = find_exact_page(part1_clean, 1, 5, pages) if pages else 1
-                    cause_title_sec = "cause_title"
-                    logger.info(f"Cause title extraction: found claimant '{cause_title_claimant}' before vs")
-                    break
+                    # Let's check roles for part1 and part2 in the document text!
+                    role_part1 = determine_name_role(part1_clean, full_text)
+                    role_part2 = determine_name_role(part2_clean, full_text)
+                    
+                    logger.info(f"Cause title roles check: '{part1_clean}' -> {role_part1}, '{part2_clean}' -> {role_part2}")
+                    
+                    if role_part1 == "non-claimant" and role_part2 == "claimant":
+                        cause_title_claimant = part2_clean
+                        cause_title_conf = 0.95
+                        cause_title_page = find_exact_page(part2_clean, 1, 5, pages) if pages else 1
+                        cause_title_sec = "cause_title"
+                        logger.info(f"Cause title extraction (role resolved): chose claimant '{cause_title_claimant}' over non-claimant '{part1_clean}'")
+                        break
+                    elif role_part2 == "non-claimant" and role_part1 == "claimant":
+                        cause_title_claimant = part1_clean
+                        cause_title_conf = 0.95
+                        cause_title_page = find_exact_page(part1_clean, 1, 5, pages) if pages else 1
+                        cause_title_sec = "cause_title"
+                        logger.info(f"Cause title extraction (role resolved): chose claimant '{cause_title_claimant}' over non-claimant '{part2_clean}'")
+                        break
+                    elif role_part1 == "non-claimant":
+                        if part2_clean and len(part2_clean) > 2:
+                            cause_title_claimant = part2_clean
+                            cause_title_conf = 0.90
+                            cause_title_page = find_exact_page(part2_clean, 1, 5, pages) if pages else 1
+                            cause_title_sec = "cause_title"
+                            logger.info(f"Cause title extraction (role resolved): chose part2 '{cause_title_claimant}' because part1 is non-claimant")
+                            break
+                    else:
+                        cause_title_claimant = part1_clean
+                        cause_title_conf = 0.90
+                        cause_title_page = find_exact_page(part1_clean, 1, 5, pages) if pages else 1
+                        cause_title_sec = "cause_title"
+                        logger.info(f"Cause title extraction (default): found claimant '{cause_title_claimant}' before vs")
+                        break
         if cause_title_claimant:
             break
 
     # 1. Claimant Name extraction
     claimant_patterns = [
-        r'^(?:\d+[\.\)\-]\s*)?\b(?:claimant|injured|victim)\b\s*(?:name)?\s*[:\-]\s*(.*)',
-        r'\b(?:name\s+of\s+)(?:claimant|injured|victim)\b\s*[:\-]\s*(.*)',
-        r'^(?:\d+[\.\)\-]\s*)?\bpetitioner\b\s*(?:name)?\s*[:\-]\s*(.*)',
-        r'\b(?:name\s+of\s+)petitioner\b\s*[:\-]\s*(.*)',
-        r'^(?:\d+[\.\)\-]\s*)?\bappellant\b\s*(?:name)?\s*[:\-]\s*(.*)',
-        r'\b(?:name\s+of\s+)appellant\b\s*[:\-]\s*(.*)',
-        r'^(?:\d+[\.\)\-]\s*)?\brespondent\b\s*(?:name)?\s*[:\-]\s*(.*)',
-        r'\b(?:name\s+of\s+)respondent\b\s*[:\-]\s*(.*)',
-        r'\bsmt\b\s*(.*)',
-        r'\bshri\b\s*(.*)',
-        r'\bmr\b\s*(.*)',
-        r'\bmrs\b\s*(.*)',
-        r'\bkumari\b\s*(.*)',
-        r'^\s*1\.\s*([A-Z][a-zA-Z\s\.\-]+)'
+        r'^(?:\d+[\.\)\-][ \t]*)?\b(?:claimant|injured|victim)\b[ \t]*(?:name)?[ \t]*[:\-][ \t]*(.*)',
+        r'\b(?:name\s+of\s+)(?:claimant|injured|victim)\b[ \t]*[:\-][ \t]*(.*)',
+        r'^(?:\d+[\.\)\-][ \t]*)?\bpetitioner\b[ \t]*(?:name)?[ \t]*[:\-][ \t]*(.*)',
+        r'\b(?:name\s+of\s+)petitioner\b[ \t]*[:\-][ \t]*(.*)',
+        r'^(?:\d+[\.\)\-][ \t]*)?\bappellant\b[ \t]*(?:name)?[ \t]*[:\-][ \t]*(.*)',
+        r'\b(?:name\s+of\s+)appellant\b[ \t]*[:\-][ \t]*(.*)',
+        r'^(?:\d+[\.\)\-][ \t]*)?\brespondent\b[ \t]*(?:name)?[ \t]*[:\-][ \t]*(.*)',
+        r'\b(?:name\s+of\s+)respondent\b[ \t]*[:\-][ \t]*(.*)',
+        r'\bsmt\b[ \t]*(.*)',
+        r'\bshri\b[ \t]*(.*)',
+        r'\bmr\b[ \t]*(.*)',
+        r'\bmrs\b[ \t]*(.*)',
+        r'\bkumari\b[ \t]*(.*)',
+        r'^[ \t]*1\.[ \t]*([A-Z][a-zA-Z\s\.\-]+)'
     ]
     
     if cause_title_claimant:
@@ -1158,10 +1212,10 @@ def parse_extracted_text(text_lines):
 
     # 2. Deceased Name extraction
     dec_patterns = [
-        r'^(?:\d+[\.\)\-]\s*)?\bdeceased\b\s*(?:name)?\s*[:\-]\s*(.*)',
-        r'\b(?:name\s+of\s+)deceased\b\s*[:\-]\s*(.*)',
-        r'^(?:\d+[\.\)\-]\s*)?\bdeath\s+of\s+(.*)',
-        r'\blate\b\s*(?:shri|smt)?\s*(.*)',
+        r'^(?:\d+[\.\)\-][ \t]*)?\bdeceased\b[ \t]*(?:name)?[ \t]*[:\-][ \t]*(.*)',
+        r'\b(?:name\s+of\s+)deceased\b[ \t]*[:\-][ \t]*(.*)',
+        r'^(?:\d+[\.\)\-][ \t]*)?\bdeath\s+of\s+(.*)',
+        r'\blate\b[ \t]*(?:shri|smt)?[ \t]*(.*)',
         r'\b([A-Z][a-zA-Z \t]+)[ \t]*(?:\(deceased\)|deceased)\b',
         r'\b(?:deceased)[ \t]+([A-Z][a-zA-Z \t]+)\b',
         r'\bdeath[ \t]+of[ \t]+(?:shri|smt|late)?[ \t]*([A-Z][a-zA-Z \t]+)\b',
@@ -1176,7 +1230,7 @@ def parse_extracted_text(text_lines):
 
     # Deceased Block Extraction (Page 8 - High Court Factual Details)
     deceased_block_match = re.search(
-        r'\b(?:deceased\s+person|description\s+of\s+deceased)\b.*?\b(?:name)\s*[:\-]\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})',
+        r'\b(?:deceased\s+person|description\s+of\s+deceased|name\s+and\s+description\s+of\s+the\s+deceased)\b.*?\b(?:name)\s*[:\-]\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})',
         full_text,
         re.IGNORECASE | re.DOTALL
     )
@@ -1958,7 +2012,7 @@ def parse_extracted_text(text_lines):
     if not total_compensation: total_compensation = ""
 
     # Legal AI Summary
-    summary_name = claimant_name or deceased_name or "claimant"
+    summary_name = deceased_name if (case_type == "death" and deceased_name) else (claimant_name or "claimant")
     summary_case = "death" if case_type == "death" else "injury"
     summary_action = "enhancement" if enhancement_reduction_request == "enhancement" else "reduction"
     

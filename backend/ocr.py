@@ -160,14 +160,15 @@ def extract_alternate_pdf_text(file_path: str) -> list:
 # IMAGE PREPROCESSING — STANDARD
 # ======================================================
 
-def preprocess_image_safe(pil_img, resize_factor=None):
+def preprocess_image_safe(pil_img, resize_factor=None, binarize=False):
     """
     Safe preprocessing pipeline for high-clarity legal documents.
     Pipeline:
     - Grayscale
-    - Mild bilateral filter for noise removal (preserving text edges)
-    - Mild CLAHE (clipLimit=1.5, tileGridSize=(8, 8))
-    - Light sharpening only
+    - Bilateral filter or fastNlMeansDenoising for noise removal (preserving text edges)
+    - CLAHE (clipLimit=2.0, tileGridSize=(8, 8))
+    - If binarize is True: Otsu thresholding and morphology close operation (best for Tesseract)
+    - If binarize is False: Light sharpening only (best for PaddleOCR)
     """
     try:
         import cv2
@@ -180,18 +181,25 @@ def preprocess_image_safe(pil_img, resize_factor=None):
         else:
             gray = open_cv_image.copy()
 
-        # 2. Bilateral filter (mild denoising)
+        # 2. Denoising (Bilateral preserves sharp text edges)
         denoised = cv2.bilateralFilter(gray, 5, 50, 50)
 
-        # 3. Mild CLAHE
-        clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
-        enhanced = clahe.apply(denoised)
+        # 3. CLAHE
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        contrast = clahe.apply(denoised)
 
-        # 4. Light sharpening
-        blurred = cv2.GaussianBlur(enhanced, (0, 0), 2.0)
-        sharpened = cv2.addWeighted(enhanced, 1.2, blurred, -0.2, 0)
-
-        return Image.fromarray(sharpened).convert("RGB")
+        if binarize:
+            # 4. Otsu's thresholding
+            _, thresh = cv2.threshold(contrast, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            # 5. Morphology close
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            processed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            return Image.fromarray(processed).convert("RGB")
+        else:
+            # 4. Light sharpening
+            blurred = cv2.GaussianBlur(contrast, (0, 0), 2.0)
+            sharpened = cv2.addWeighted(contrast, 1.2, blurred, -0.2, 0)
+            return Image.fromarray(sharpened).convert("RGB")
     except Exception as e:
         logger.warning(f"Safe preprocessing failed, returning original image: {str(e)}")
         return pil_img
@@ -381,27 +389,42 @@ def run_tesseract_fallback(pil_img) -> tuple:
     """
     Fallback OCR engine using Tesseract (pytesseract).
     Configured to use the verified C:\\Program Files\\Tesseract-OCR\\tesseract.exe binary.
+    Supports both English and Hindi with graceful fallback if hin.traineddata is missing.
     Returns: (text_lines: list[str], avg_confidence: float)
     """
     try:
         import pytesseract
         pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
         
-        # We can extract text directly
-        text_str = pytesseract.image_to_string(pil_img)
+        # Try eng+hin multi-language OCR first
+        try:
+            text_str = pytesseract.image_to_string(pil_img, lang="eng+hin")
+            config_lang = "eng+hin"
+        except Exception as lang_err:
+            logger.info("Tesseract Hindi pack missing or failed, falling back to English only.")
+            text_str = pytesseract.image_to_string(pil_img, lang="eng")
+            config_lang = "eng"
+            
         text_lines = [line.strip() for line in text_str.split("\n") if line.strip()]
         
         # Get confidence scores using image_to_data
-        data = pytesseract.image_to_data(pil_img, output_type=pytesseract.Output.DICT)
+        try:
+            data = pytesseract.image_to_data(pil_img, lang=config_lang, output_type=pytesseract.Output.DICT)
+        except Exception:
+            try:
+                data = pytesseract.image_to_data(pil_img, lang="eng", output_type=pytesseract.Output.DICT)
+            except Exception:
+                data = {}
+            
         confidences = []
-        if 'conf' in data:
+        if 'data' in locals() and isinstance(data, dict) and 'conf' in data:
             for c in data['conf']:
                 val = float(c)
                 if val >= 0: # -1 indicates empty/layout block
                     confidences.append(val / 100.0) # convert 0-100 to 0.0-1.0
         
         avg_conf = float(np.mean(confidences)) if confidences else 0.0
-        logger.info(f"Tesseract fallback: {len(text_lines)} lines extracted (avg confidence {avg_conf:.2f})")
+        logger.info(f"Tesseract fallback ({config_lang}): {len(text_lines)} lines extracted (avg confidence {avg_conf:.2f})")
         return text_lines, avg_conf
     except Exception as e:
         logger.error(f"Tesseract fallback failed: {str(e)}")
@@ -531,12 +554,16 @@ def perform_ocr_page_with_retry(ocr_engine, page_doc, page_idx: int, total_pages
             f"(reason: empty={len(text_lines)==0}, confidence={confidence:.2f}<0.50, text_density={text_density:.2f}<0.15)"
         )
         try:
-            tess_lines, tess_conf = run_tesseract_fallback(processed_pil)
+            # Apply binarized OTSU + morphology preprocessing specifically for Tesseract fallback
+            binarized_pil = preprocess_image_safe(original_pil, binarize=True)
+            save_ocr_debug_image(f"debug_processed_binarized_{page_num}.png", binarized_pil)
+            
+            tess_lines, tess_conf = run_tesseract_fallback(binarized_pil)
             if tess_lines and tess_conf > confidence:
                 text_lines = tess_lines
                 confidence = tess_conf
                 engine_used = "Tesseract"
-                preprocessing_applied.append("tesseract_fallback")
+                preprocessing_applied.append("tesseract_fallback_binarized")
                 logger.info(f"Page {page_num}/{total_pages} - Tesseract successful: {len(text_lines)} lines, confidence: {confidence:.2f}")
         except Exception as e:
             logger.error(f"Page {page_num}/{total_pages} - Tesseract fallback failed: {str(e)}")
@@ -856,11 +883,46 @@ def perform_ocr_on_image(file_path: str) -> tuple:
 
 def is_extracted_text_sparse(text_lines: list) -> bool:
     """
-    Returns True if extracted text (excluding page markers) has fewer than 15 lines.
+    Returns True if extracted text (excluding page markers) has fewer than 15 lines
+    OR if the text is detected as heavily garbled (poor quality digital encoding).
     Used to decide whether to escalate to the scanned-PDF OCR pipeline.
     """
     actual = [l for l in text_lines if not l.strip().startswith("--- PAGE")]
-    return len(actual) < 15
+    if len(actual) < 15:
+        return True
+
+    # Quality check for garbled digital text layers (highly scrambled/corrupted font encodings):
+    full_text = " ".join(actual).lower()
+    
+    # 1. Check legal keyword hits in the text
+    legal_keywords = ["tribunal", "claimant", "petitioner", "accident", "compensation", "deceased", "injured", "insurance", "award", "judgment"]
+    kw_hits = sum(1 for kw in legal_keywords if kw in full_text)
+    
+    # 2. Check symbol density and word quality
+    words = [w for w in full_text.split() if w]
+    if not words:
+        return True
+        
+    avg_word_len = sum(len(w) for w in words) / len(words)
+    # High proportion of long unspaced words with multiple special characters indicates a corrupted text layer
+    gibberish_words = sum(1 for w in words if len(w) > 15 or any(c in w for c in '@#$[]{}|'))
+    gibberish_ratio = gibberish_words / len(words)
+    
+    # If the text has very few legal keywords despite being long, OR high gibberish ratio, OR extreme word length, flag as poor quality
+    is_poor_quality = (
+        (kw_hits < 3 and len(actual) > 50) or
+        (gibberish_ratio > 0.05) or
+        (avg_word_len > 12.0) or
+        (avg_word_len < 2.5 and len(actual) > 50)
+    )
+    if is_poor_quality:
+        logger.info(
+            f"Digital text quality check: detected garbled text layer (kw_hits={kw_hits}, "
+            f"gibberish_ratio={gibberish_ratio:.2f}, avg_word_len={avg_word_len:.1f}). Escalate to OCR fallback."
+        )
+        return True
+        
+    return False
 
 
 def extract_award_amount_from_text(text_lines: list) -> float:
