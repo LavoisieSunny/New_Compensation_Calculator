@@ -12,3 +12,5 @@ pypdfium2>=4.0.0
 pymupdf>=1.23.0
 pdfplumber>=0.10.0
 easyocr>=1.7.0
+pytesseract>=0.3.10
+pdf2image>=1.17.0

@@ -675,9 +675,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Apply parsed suggestions
     function applyAllOcrSuggestions(suggestions) {
-        // Clear all previous low-confidence warning labels and styles
+        // Clear all previous low-confidence warning labels, styles, and AI metadata badges
         document.querySelectorAll(".verification-warning").forEach(el => el.remove());
         document.querySelectorAll(".low-confidence-input").forEach(el => el.classList.remove("low-confidence-input"));
+        document.querySelectorAll(".ai-metadata-badge").forEach(el => el.remove());
 
         if (suggestions.case_type) {
             caseTypeSelect.value = suggestions.case_type;
@@ -726,6 +727,16 @@ document.addEventListener("DOMContentLoaded", () => {
             "disability": "disability"
         };
 
+        const processedInputIds = new Set();
+
+        function cleanSectionName(secName) {
+            if (!secName) return "N/A";
+            return secName
+                .replace(/_/g, ' ')
+                .replace(/-/g, ' ')
+                .replace(/\b\w/g, c => c.toUpperCase());
+        }
+
         if (suggestions.confidence_scores) {
             Object.keys(suggestions.confidence_scores).forEach(key => {
                 const confObj = suggestions.confidence_scores[key];
@@ -734,25 +745,65 @@ document.addEventListener("DOMContentLoaded", () => {
                     confidence = Math.round(confidence * 100);
                 }
                 const domId = fieldMapping[key];
-                if (domId) {
+                if (domId && !processedInputIds.has(domId)) {
                     const inputEl = document.getElementById(domId);
                     if (inputEl) {
-                        // Flag if confidence < 70
-                        if (confidence < 70 && confidence > 0) {
-                            // Find parent form-group to apply styles
-                            const formGroup = inputEl.closest(".form-group");
-                            if (formGroup) {
-                                // Add low confidence border
+                        processedInputIds.add(domId);
+                        const formGroup = inputEl.closest(".form-group");
+                        if (formGroup) {
+                            // 1. Create premium interactive badge and glassmorphic tooltip
+                            const badge = document.createElement("div");
+                            badge.className = "ai-metadata-badge";
+                            
+                            const isLow = confidence < 70;
+                            const badgeColor = isLow ? "var(--color-warning)" : "var(--color-success)";
+                            const iconClass = isLow ? "fa-solid fa-triangle-exclamation" : "fa-solid fa-circle-check";
+                            
+                            badge.innerHTML = `
+                                <i class="${iconClass}" style="color: ${badgeColor}"></i>
+                                <span class="ai-metadata-pct" style="color: ${badgeColor}">${confidence}%</span>
+                                <div class="ai-metadata-tooltip">
+                                    <div class="tooltip-header">
+                                        <i class="fa-solid fa-sparkles text-glow"></i> AI Extraction Metrics
+                                    </div>
+                                    <div class="tooltip-row">
+                                        <span class="t-label">Confidence:</span>
+                                        <span class="t-value" style="color: ${badgeColor}">${confidence}%</span>
+                                    </div>
+                                    <div class="tooltip-row">
+                                        <span class="t-label">Source Section:</span>
+                                        <span class="t-value text-glow-purple">${cleanSectionName(confObj.source_section || confObj.source || 'N/A')}</span>
+                                    </div>
+                                    <div class="tooltip-row">
+                                        <span class="t-label">Source Page:</span>
+                                        <span class="t-value">Page ${confObj.source_page || 1}</span>
+                                    </div>
+                                    <div class="tooltip-row">
+                                        <span class="t-label">Extraction Method:</span>
+                                        <span class="t-value" style="color: var(--color-primary); font-size: 0.72rem;">${confObj.extraction_method || 'N/A'}</span>
+                                    </div>
+                                </div>
+                            `;
+                            
+                            const label = formGroup.querySelector("label");
+                            if (label) {
+                                label.style.display = "flex";
+                                label.style.alignItems = "center";
+                                label.style.justifyContent = "space-between";
+                                label.style.width = "100%";
+                                label.appendChild(badge);
+                            }
+
+                            // 2. Flag if confidence < 70 (keep legacy low-confidence warning border)
+                            if (isLow && confidence > 0) {
                                 const wrapper = inputEl.closest(".input-icon-wrapper") || inputEl.closest(".select-wrapper") || inputEl;
                                 wrapper.classList.add("low-confidence-input");
                                 
-                                // Insert small warning message
                                 const warningMsg = document.createElement("div");
                                 warningMsg.className = "verification-warning";
                                 warningMsg.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Low confidence (${confidence}%). Verify manually.`;
                                 formGroup.appendChild(warningMsg);
                                 
-                                // Clear warning when user interacts or changes value
                                 const clearWarning = () => {
                                     wrapper.classList.remove("low-confidence-input");
                                     warningMsg.remove();
@@ -1389,6 +1440,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.getElementById("reset-btn").addEventListener("click", () => {
         compensationForm.reset();
+        
+        // Clear AI metadata badges
+        document.querySelectorAll(".ai-metadata-badge").forEach(el => el.remove());
         
         sharedFields.classList.remove("show");
         deathFields.classList.remove("show");

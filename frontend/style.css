@@ -1708,4 +1708,97 @@ select.low-confidence-input {
     text-shadow: 0 0 8px rgba(0, 242, 254, 0.3);
 }
 
+/* AI Document Intelligence extraction badges & tooltips */
+.ai-metadata-badge {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-glass);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    cursor: help;
+    z-index: 5;
+    transition: all var(--transition-fast);
+}
+
+.ai-metadata-badge:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.ai-metadata-tooltip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    width: 250px;
+    background: rgba(11, 20, 38, 0.95);
+    backdrop-filter: blur(15px);
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    box-shadow: var(--shadow-premium);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(8px) scale(0.95);
+    transition: opacity var(--transition-fast), transform var(--transition-fast), visibility var(--transition-fast);
+    z-index: 100;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: var(--text-primary);
+    text-shadow: none;
+}
+
+.ai-metadata-badge:hover .ai-metadata-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0) scale(1);
+}
+
+.tooltip-header {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--color-primary);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 6px;
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-align: left;
+}
+
+.tooltip-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.75rem;
+    gap: 12px;
+}
+
+.tooltip-row .t-label {
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.tooltip-row .t-value {
+    color: var(--text-secondary);
+    font-weight: 600;
+    text-align: right;
+}
+
+/* Glassmorphic colors in tooltip values */
+.text-glow-purple {
+    color: #c084fc !important;
+    text-shadow: 0 0 6px rgba(168, 85, 247, 0.4);
+}
+
 

@@ -5,6 +5,41 @@ from datetime import datetime
 logger = logging.getLogger("ParserHeuristics")
 
 
+# Dynamic Section Keyword Definitions
+HEADING_KEYWORDS = {
+    "index_section": [
+        "index", "description of documents", "annexure", "table of contents", "index sheet"
+    ],
+    "chronological_events_section": [
+        "chronological events", "date of accident", "claim petition filed", "list of dates", "chronology"
+    ],
+    "memo_of_appeal_section": [
+        "memo of appeal", "grounds of appeal", "relief claimed", "appeal memo"
+    ],
+    "award_copy_section": [
+        "copy of award", "compensation awarded", "total compensation", "award decree", "award is passed", "impugned award"
+    ],
+    "vakalatnama_section": [
+        "vakalatnama", "vakalat", "power of attorney", "memo of appearance"
+    ],
+    "claimant_section": [
+        "claimants", "respondents", "legal representatives", "petitioners", "parties to the", "cause title", "party details"
+    ],
+    "accident_section": [
+        "accident", "manner of accident", "details of accident", "occurrence of accident", "date of accident"
+    ],
+    "compensation_section": [
+        "compensation", "quantum", "assessment of compensation", "heads of claim", "calculation", "loss of dependency"
+    ],
+    "relief_section": [
+        "relief", "prayer", "relief claimed", "prayer clause"
+    ],
+    "grounds_section": [
+        "grounds", "grounds of appeal", "grounds of objection", "grounds of challenge"
+    ]
+}
+
+
 def clean_noisy_text(text_line):
     """
     Cleans OCR scanning noise, stray characters, and common digit typos (like letter O/o instead of 0).
@@ -124,6 +159,7 @@ def clean_legal_name(name_str):
     """
     Step 3 — Name Cleaning:
     Removes legal prefixes and filters out non-claimant legal entities.
+    Applies Entity Contamination Prevention keywords.
     """
     if not name_str:
         return ""
@@ -132,7 +168,8 @@ def clean_legal_name(name_str):
     IGNORE_KEYWORDS = [
         "advocate", "counsel", "judge", "justice", "respondent", 
         "insurance company", "insurance co", "citation", "referred case", 
-        "versus", "v.", "vs.", "respondents"
+        "versus", "v.", "vs.", "respondents", "appellant", "cited case", 
+        "vakalatnama", "scc", "acj"
     ]
     name_lower = name_str.lower()
     if any(kw in name_lower for kw in IGNORE_KEYWORDS):
@@ -142,14 +179,17 @@ def clean_legal_name(name_str):
     name_str = name_str.strip()
     name_str = re.sub(r'^[\"\’\‘\“\”\s\.\,\-\/]+|[\"\’\‘\“\”\s\.\,\-\/]+$', '', name_str)
     
-    # Remove standard titles with case-insensitive word boundaries
-    prefixes = [r'\bshri\b', r'\bsmt\b', r'\bmr\b', r'\bmrs\b', r'\bkumari\b', r'\blate\b']
+    # Remove standard titles with case-insensitive word boundaries (optional dot included)
+    prefixes = [r'\bshri\b\.?', r'\bsmt\b\.?', r'\bmr\b\.?', r'\bmrs\b\.?', r'\bkumari\b\.?', r'\blate\b\.?']
     for pref in prefixes:
         name_str = re.sub(pref, '', name_str, flags=re.IGNORECASE)
         
     # Remove relationship fragments if they leaked
     name_str = re.sub(r'[\s,\-]+(?:s/o|d/o|w/o|son of|daughter of|wife of).*$', '', name_str, flags=re.IGNORECASE)
     
+    # Strip leading/trailing punctuation noise once more after prefix removal
+    name_str = re.sub(r'^[\"\’\‘\“\”\s\.\,\-\/]+|[\"\’\‘\“\”\s\.\,\-\/]+$', '', name_str)
+
     # Normalize spaces
     name_str = re.sub(r'\s+', ' ', name_str).strip()
     return name_str
@@ -250,8 +290,6 @@ def parse_indian_rupee_value(text):
     Parses and normalises Indian currency text, converting Lakhs, Crores, commas, and suffixes into float.
     E.g. "Rs. 1,50,000/-" -> 150000.0
          "1.5 Lakhs" -> 150000.0
-         "2.5 Lakh" -> 250000.0
-         "Rs. 2 Lakhs" -> 200000.0
     """
     if not text:
         return 0.0
@@ -292,15 +330,11 @@ def parse_compensation_table(text):
     """
     Layer 3: Compensation Table Parser.
     Parses structured lists of compensation heads and amounts from text blocks.
-    E.g. "1. Loss of dependency: Rs. 10,80,000/-" -> {"Loss of dependency": 1080000.0}
     """
     table = {}
     lines = text.split("\n")
     
-    # Restrict heads strictly to key MACT compensation terms
     valid_heads = ["dependency", "consortium", "funeral", "estate", "pain", "medical", "transport", "nourishment", "attender", "disability", "amenities", "earning", "structure"]
-    
-    # Matches patterns like "1. Loss of dependency: Rs. 10,80,000/-" or "Loss of consortium ... Rs. 40,000"
     pattern = r'(?:\d+[\.\)\-]\s*)?([A-Za-z\s&\(\)/\-\’\‘\“\”]+)\s*(?:[:\-–]|\b\.?\s*rs\.?\b)\s*(?:rs\.?|inr)?\s*([\d,\.\s]+lakhs?|[\d,\.\-\/]+)\b'
     
     for line in lines:
@@ -313,7 +347,6 @@ def parse_compensation_table(text):
             head = m.group(1).strip()
             head = re.sub(r'\s+', ' ', head).strip()
             
-            # Filter out obviously false table rows and ensure it contains valid legal heads
             if len(head) > 3 and any(kw in head.lower() for kw in valid_heads):
                 if not any(kw in head.lower() for kw in ["total", "awarded", "interest", "passed", "order", "judgment"]):
                     val = parse_indian_rupee_value(m.group(2))
@@ -323,13 +356,335 @@ def parse_compensation_table(text):
     return table
 
 
-def contextual_extract(patterns, sections, priority_list, type_cast=str, default_val=None, field_name=None, debug_info=None, line_page_map=None):
+def fuzzy_match_heading(line, keywords):
+    """Matches a line against a list of fuzzy keywords for heading detection."""
+    # Remove list indicators / bullets like '1. ', 'A. ', 'I. ', 'a) ', 'i) '
+    line_lower = re.sub(r'^(?:[ivxIVX]+|\d+|[a-zA-Z])[\.\)\-\]]\s*', '', line).strip().lower()
+    for kw in keywords:
+        kw_lower = kw.lower().strip()
+        # 1. Exact match
+        if kw_lower == line_lower:
+            return True
+        # 2. Strict substring match with length threshold to avoid matching inside paragraphs
+        if kw_lower in line_lower and len(line_lower) < len(kw_lower) + 12:
+            return True
+        # 3. Fuzzy sequencing match
+        words = kw_lower.split()
+        if len(words) > 1:
+            pattern = r'.*'.join(re.escape(w) for w in words)
+            if re.search(r'^\s*' + pattern, line_lower) and len(line_lower) < len(kw_lower) + 15:
+                return True
+    return False
+
+
+def classify_page_fallback(page_text, section_name):
+    """Layout fallback classifier for page classification when headings are missing."""
+    text_lower = page_text.lower()
+    
+    if section_name == "index_section":
+        return any(w in text_lower for w in ["index", "description of documents", "annexure", "page no"])
+        
+    elif section_name == "chronological_events_section":
+        dates = re.findall(r'\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4}\b', page_text)
+        return len(dates) >= 2 and any(w in text_lower for w in ["accident", "filed", "petition", "date"])
+        
+    elif section_name == "claimant_section":
+        has_rel = any(w in text_lower for w in ["s/o", "d/o", "w/o", "son of", "wife of"])
+        has_parties = any(w in text_lower for w in ["claimant", "petitioner", "versus", "respondent"])
+        return has_rel or has_parties
+        
+    elif section_name == "vakalatnama_section":
+        return any(w in text_lower for w in ["vakalatnama", "vakalath", "appoint", "advocate"])
+        
+    elif section_name == "accident_section":
+        return any(w in text_lower for w in ["date of accident", "manner of accident", "accident took place"])
+        
+    elif section_name == "compensation_section" or section_name == "award_copy_section":
+        comp_kws = ["dependency", "multiplier", "consortium", "funeral", "loss of", "pain and suffering", "medical expenses", "rs.", "compensation", "award", "awarded", "disability"]
+        comp_hits = sum(1 for kw in comp_kws if kw in text_lower)
+        return comp_hits >= 2
+        
+    elif section_name == "relief_section":
+        return any(w in text_lower for w in ["prayer", "relief", "prayed for", "allow the appeal"])
+        
+    elif section_name == "grounds_section" or section_name == "memo_of_appeal_section":
+        return any(w in text_lower for w in ["grounds of appeal", "grounds", "erred in", "failed to appreciate"])
+        
+    return False
+
+
+def detect_document_sections(full_text, pages):
     """
-    Layer 2: Upgraded Contextual Entity Extraction with strict field-boundary rules.
-    Searches only within prioritized legal sections using specific anchor words.
-    Returns (value, confidence_float, source_section).
+    Dynamically identifies sections of the document using semantic heading matching
+    and layout fallbacks.
     """
-    # Step 1: Strict stop labels list
+    doc_lines = []
+    for p in pages:
+        p_num = p["page_number"]
+        for line_idx, line in enumerate(p["lines"]):
+            cleaned = clean_noisy_text(line)
+            if cleaned:
+                doc_lines.append({
+                    "text": cleaned,
+                    "page": p_num,
+                    "line_idx": line_idx
+                })
+                
+    # 1. Fuzzy Heading Detection
+    detected_headers = []
+    for idx, item in enumerate(doc_lines):
+        line_text = item["text"]
+        page_num = item["page"]
+        
+        if len(line_text) > 70:
+            continue
+            
+        for sec_name, keywords in HEADING_KEYWORDS.items():
+            if fuzzy_match_heading(line_text, keywords):
+                detected_headers.append({
+                    "section_name": sec_name,
+                    "line_idx": idx,
+                    "page": page_num
+                })
+                break
+                
+    # 2. Section Boundary Detection
+    sections = {}
+    total_lines = len(doc_lines)
+    
+    for k, match in enumerate(detected_headers):
+        sec_name = match["section_name"]
+        start_idx = match["line_idx"]
+        start_page = match["page"]
+        
+        if k + 1 < len(detected_headers):
+            next_match = detected_headers[k+1]
+            next_start_idx = next_match["line_idx"]
+            next_page = next_match["page"]
+            
+            if next_page > start_page:
+                end_page = next_page - 1
+                end_idx = start_idx
+                for idx in range(start_idx, next_start_idx):
+                    if doc_lines[idx]["page"] <= end_page:
+                        end_idx = idx
+            else:
+                end_page = start_page
+                end_idx = next_start_idx - 1
+        else:
+            end_page = pages[-1]["page_number"] if pages else start_page
+            end_idx = total_lines - 1
+            
+        content_lines = [doc_lines[idx]["text"] for idx in range(start_idx, end_idx + 1)]
+        content = "\n".join(content_lines)
+        
+        if sec_name not in sections:
+            sections[sec_name] = {
+                "section_name": sec_name,
+                "start_page": start_page,
+                "end_page": end_page,
+                "content": content,
+                "strong_match": True
+            }
+        else:
+            existing = sections[sec_name]
+            existing["start_page"] = min(existing["start_page"], start_page)
+            existing["end_page"] = max(existing["end_page"], end_page)
+            existing["content"] += "\n" + content
+            
+    # 3. Fallback Strategy for Missing Sections
+    for sec_name in HEADING_KEYWORDS.keys():
+        if sec_name not in sections:
+            fallback_pages = []
+            for p in pages:
+                p_text = p["text"]
+                if classify_page_fallback(p_text, sec_name):
+                    fallback_pages.append(p)
+                    
+            if fallback_pages:
+                start_p = fallback_pages[0]["page_number"]
+                end_p = fallback_pages[-1]["page_number"]
+                content = "\n".join(p["text"] for p in fallback_pages)
+                sections[sec_name] = {
+                    "section_name": sec_name,
+                    "start_page": start_p,
+                    "end_page": end_p,
+                    "content": content,
+                    "strong_match": False
+                }
+                
+    return sections
+
+
+def find_exact_page(value, start_page, end_page, pages):
+    """Finds the exact page number that contains a value within a page range."""
+    if not value:
+        return start_page
+    val_str = str(value).lower().strip()
+    for p in pages:
+        p_num = p["page_number"]
+        if start_page <= p_num <= end_page:
+            if val_str in p["text"].lower():
+                return p_num
+    return start_page
+
+
+def score_page_importance(page_text, page_num):
+    """
+    Computes an importance/confidence score for a page.
+    Drastically suppresses priority if legal citation and precedent keywords are matched.
+    """
+    text_lower = page_text.lower()
+    score = 0.5
+    
+    heading_kws = ["index", "chronological", "appeal", "award", "vakalatnama", "claimant", "accident", "compensation", "relief", "grounds", "prayer"]
+    if any(kw in text_lower for kw in heading_kws):
+        score += 0.15
+        
+    if any(kw in text_lower for kw in ["form", "petition under", "s/o", "d/o", "w/o", "aged about"]):
+        score += 0.20
+        
+    dates = re.findall(r'\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4}\b', page_text)
+    if len(dates) >= 2 and any(kw in text_lower for kw in ["accident", "filed", "passed"]):
+        score += 0.20
+        
+    comp_kws = ["loss of dependency", "multiplier", "consortium", "funeral expenses", "medical expenses", "pain and suffering"]
+    if sum(1 for kw in comp_kws if kw in text_lower) >= 2:
+        score += 0.25
+        
+    # Legal Citation Suppression Rule
+    citation_patterns = [
+        r'\b\d{4}\s+(?:SCC|ACJ)\s+\d+\b',
+        r'\(\d{4}\)\s+\d+\s+(?:SCC|ACJ)\s+\d+\b',
+        r'\bvs\b',
+        r'\bversus\b',
+        r'\breported\s+in\b'
+    ]
+    has_citation = any(re.search(pat, page_text, re.IGNORECASE) for pat in citation_patterns)
+    precedent_terms = ["precedent", "judgment", "ruling", "held in", "cited", "referred to", "supreme court", "high court"]
+    precedent_count = sum(1 for term in precedent_terms if term in text_lower)
+    
+    if has_citation or precedent_count >= 3:
+        score = 0.10 # Drastic suppression
+        
+    return min(1.0, max(0.05, round(score, 3)))
+
+
+def parse_chronological_events(text):
+    """
+    DATE -> EVENT chronological parser.
+    Parses events like:
+    25.12.2021 -> Date of accident
+    """
+    events = {
+        "date_of_accident": "",
+        "claim_petition_date": "",
+        "award_date": ""
+    }
+    date_pattern = r'\b(\d{1,2})[-/\.](\d{1,2})[-/\.](\d{4})\b'
+    lines = text.split("\n")
+    for line in lines:
+        m = re.search(date_pattern, line)
+        if m:
+            try:
+                d_str = f"{int(m.group(1)):02d}-{int(m.group(2)):02d}-{m.group(3)}"
+                event_text = line.replace(m.group(0), "").lower().strip()
+                event_text = re.sub(r'^[\s\.\:\-\–\—\→\>\|\/\\\t\?]+|[\s\.\:\-\–\—\→\>\|\/\\\t\?]+$', '', event_text)
+                
+                if any(kw in event_text for kw in ["accident", "collision", "crash", "incident", "occurrence"]):
+                    if not events["date_of_accident"]:
+                        events["date_of_accident"] = d_str
+                elif any(kw in event_text for kw in ["petition filed", "claim petition", "mcop filed", "m.c.o.p", "filed"]):
+                    if not events["claim_petition_date"]:
+                        events["claim_petition_date"] = d_str
+                elif any(kw in event_text for kw in ["award passed", "judgment", "decree", "order", "passed", "disposed"]):
+                    if not events["award_date"]:
+                        events["award_date"] = d_str
+            except ValueError:
+                pass
+    return events
+
+
+def extract_compensation_table_fields(section_content):
+    """
+    Extracts structured compensation fields strictly from the isolated compensation table area.
+    """
+    fields = {
+        "monthly_income": None,
+        "future_prospect": None,
+        "deduction": None,
+        "annual_loss_dependency": None,
+        "multiplier": None,
+        "funeral_expenses": None,
+        "consortium": None,
+        "total_compensation": None
+    }
+    
+    lines = section_content.split("\n")
+    table_lines = []
+    in_table = False
+    consecutive_non_table = 0
+    
+    table_kws = ["dependency", "consortium", "funeral", "estate", "pain", "medical", "transport", "nourishment", "attender", "disability", "amenities", "earning", "multiplier", "prospects", "deduction", "income", "salary", "total", "awarded"]
+    
+    for line in lines:
+        line_lower = line.lower()
+        has_kw = any(kw in line_lower for kw in table_kws)
+        has_digits = bool(re.search(r'\d', line))
+        
+        if has_kw and has_digits:
+            in_table = True
+            table_lines.append(line)
+            consecutive_non_table = 0
+        elif in_table:
+            consecutive_non_table += 1
+            if consecutive_non_table > 2:
+                if "total" in line_lower:
+                    table_lines.append(line)
+                break
+            else:
+                table_lines.append(line)
+                
+    for line in table_lines:
+        line_lower = line.lower()
+        
+        # Isolate the currency value part at the end of the line (e.g. "Rs. 12,00,000/-") to avoid serial prefix mixup
+        val = 0.0
+        val_match = re.search(r'(?:rs\.?|inr|rupees)?\s*([\d,\.]+\s*(?:lakhs?|lac|lacs)?(?:\/\-)?)\s*$', line_lower)
+        if val_match:
+            val = parse_indian_rupee_value(val_match.group(1))
+        
+        mult_match = re.search(r'\bmultiplier\b.*?\b(\d{1,2})\b', line_lower)
+        if mult_match:
+            fields["multiplier"] = int(mult_match.group(1))
+            
+        pros_pct_match = re.search(r'\bfuture\s+prospects?\b.*?\b(\d{1,2}(?:\.\d+)?)\s*%', line_lower)
+        if pros_pct_match:
+            fields["future_prospect"] = float(pros_pct_match.group(1))
+            
+        ded_pct_match = re.search(r'\bdeduction\b.*?\b(\d+(?:\.\d+)?)\s*(?:%|/|\b)', line_lower)
+        if ded_pct_match:
+            fields["deduction"] = float(ded_pct_match.group(1))
+            
+        if val > 0:
+            if "monthly" in line_lower and ("income" in line_lower or "salary" in line_lower or "earnings" in line_lower):
+                fields["monthly_income"] = val
+            elif "loss of dependency" in line_lower or "annual loss" in line_lower:
+                fields["annual_loss_dependency"] = val
+            elif "funeral" in line_lower:
+                fields["funeral_expenses"] = val
+            elif "consortium" in line_lower:
+                fields["consortium"] = val
+            elif "total" in line_lower:
+                fields["total_compensation"] = val
+                
+    return fields
+
+
+def contextual_extract(patterns, sections, priority_list, type_cast=str, default_val=None, field_name=None, debug_info=None, pages=None, sections_metadata=None, page_importances=None):
+    """
+    Upgraded Contextual Entity Extraction with dynamic section priority and page-importance tracking.
+    """
     STOP_LABELS = [
         "date of birth", "dob", "d.o.b", "born on",
         "age", "aged",
@@ -341,7 +696,6 @@ def contextual_extract(patterns, sections, priority_list, type_cast=str, default
         "marital status",
         "prayer", "relief",
         "award", "awarded",
-        # Relationship boundaries
         "s/o", "d/o", "w/o", "son of", "daughter of", "wife of"
     ]
     
@@ -354,45 +708,38 @@ def contextual_extract(patterns, sections, priority_list, type_cast=str, default
             continue
             
         for pat in patterns:
-            # Step 2: Use broad capture with safe case-insensitive search on raw-cased text
             m = re.search(pat, text, re.IGNORECASE)
             if m:
                 matched_source = m.group(0)
                 raw_val = m.group(1).strip()
                 
-                # Filter out stop labels that are part of the pattern or field parameters to prevent self-truncation
                 active_stop_labels = []
                 for sl in STOP_LABELS:
                     if field_name == "father_name" and sl in ["s/o", "d/o", "w/o", "son of", "daughter of", "wife of"]:
                         continue
                     active_stop_labels.append(sl)
                     
-                # Strict boundary truncation logic (Step 1 & Step 2)
                 truncated_val = raw_val
                 stop_token_triggered = "None (EOL/EOF)"
                 
                 is_text_field = (type_cast == str) and field_name in ["claimant_name", "deceased_name", "father_name", "occupation", "address"]
                 
-                # 1. Truncate at Comma for text name/occupation fields
                 if is_text_field:
                     comma_pos = truncated_val.find(",")
                     if comma_pos != -1:
                         truncated_val = truncated_val[:comma_pos]
                         stop_token_triggered = ", (comma)"
                         
-                # 2. Truncate at Newline
                 newline_pos = re.search(r'[\r\n]', truncated_val)
                 if newline_pos:
                     truncated_val = truncated_val[:newline_pos.start()]
                     stop_token_triggered = "Newline boundary"
                     
-                # 3. Truncate at Date Pattern
                 date_pos = re.search(r'\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4}\b', truncated_val)
                 if date_pos:
                     truncated_val = truncated_val[:date_pos.start()]
                     stop_token_triggered = f"Date pattern ({date_pos.group(0)})"
                     
-                # 4. Truncate at Stop Labels
                 for sl in active_stop_labels:
                     sl_match = re.search(r'\b' + re.escape(sl) + r'\b', truncated_val, re.IGNORECASE)
                     if sl_match:
@@ -400,21 +747,16 @@ def contextual_extract(patterns, sections, priority_list, type_cast=str, default
                             truncated_val = truncated_val[:sl_match.start()]
                             stop_token_triggered = f"Stop label '{sl}'"
                             
-                # 5. Truncate at Numeric metadata boundaries
                 if is_text_field:
                     num_meta_match = re.search(r'\b\d+\s*(?:years|yrs|percent|%|\b)', truncated_val, re.IGNORECASE)
                     if num_meta_match:
                         truncated_val = truncated_val[:num_meta_match.start()]
                         stop_token_triggered = f"Numeric metadata boundary ({num_meta_match.group(0)})"
                         
-                # Clean up spacing
                 final_val = re.sub(r'\s+', ' ', truncated_val).strip()
-                
-                # Step 3: Name cleaning for text fields
                 if is_text_field:
                     final_val = clean_legal_name(final_val)
                     
-                # Step 6: Record Debug Output
                 if field_name:
                     debug_info[field_name] = {
                         "matched_source_text": matched_source.strip(),
@@ -424,81 +766,79 @@ def contextual_extract(patterns, sections, priority_list, type_cast=str, default
                         "final_extracted": final_val
                     }
                     
+                # Determine source page
+                sec_meta = sections_metadata.get(sec_name, {}) if sections_metadata else {}
+                start_p = sec_meta.get("start_page", 1)
+                end_p = sec_meta.get("end_page", 1)
+                matched_page = find_exact_page(final_val, start_p, end_p, pages) if pages else start_p
+                
+                # Base confidence score
+                confidence = round(base_weight / 100.0, 2)
+                
+                # Boost confidence if the section is strongly matched
+                if sec_meta.get("strong_match", False):
+                    confidence = min(0.99, confidence + 0.15)
+                    
+                # Boost confidence for early pages
+                if matched_page <= 3:
+                    confidence = min(0.99, confidence + 0.10)
+                else:
+                    confidence = max(0.10, confidence - 0.15)
+                    
+                # Adjust confidence based on Page Importance / Suppression
+                if page_importances and matched_page in page_importances:
+                    page_importance = page_importances[matched_page]
+                    if page_importance <= 0.15:
+                        confidence = max(0.05, confidence - 0.40)
+                    else:
+                        confidence = min(0.99, confidence * (0.5 + 0.5 * page_importance))
+                        
+                if is_text_field:
+                    confidence = validate_name_confidence(final_val, confidence)
+                    
                 if type_cast == float:
                     val = parse_indian_rupee_value(final_val)
                     if val > 0:
-                        return val, round(base_weight / 100.0, 2), sec_name
+                        return val, round(confidence, 2), sec_name, matched_page
                 elif type_cast == int:
                     digit_match = re.search(r'\d+', final_val)
                     if digit_match:
                         try:
                             val = int(digit_match.group(0))
-                            return val, round(base_weight / 100.0, 2), sec_name
+                            return val, round(confidence, 2), sec_name, matched_page
                         except ValueError:
                             pass
                 else:
                     if len(final_val) > 2:
-                        # Step 5: Validate and reduce confidence if needed
-                        confidence = round(base_weight / 100.0, 2)
+                        return final_val, round(confidence, 2), sec_name, matched_page
                         
-                        # Prioritize early document pages (Requirement 10)
-                        matched_page = 4
-                        if line_page_map:
-                            if final_val in line_page_map:
-                                matched_page = line_page_map[final_val]
-                            else:
-                                for l_text, p_num in line_page_map.items():
-                                    if l_text in matched_source or matched_source in l_text:
-                                        matched_page = p_num
-                                        break
-                                        
-                        if matched_page <= 3:
-                            confidence = min(0.95, confidence + 0.10)
-                        else:
-                            confidence = max(0.20, confidence - 0.20)
-                            
-                        confidence = validate_name_confidence(final_val, confidence)
-                        return final_val, confidence, sec_name
-                        
-    fallback_confidence = 0.40
-    return default_val, fallback_confidence, "raw_ocr"
+    fallback_confidence = 0.30
+    return default_val, fallback_confidence, "raw_ocr", 1
 
 
 def real_text_recovery(petitioner_details, prayer_section, compensation_paragraphs, award_section, case_type):
     """
     Layer 4: Real-Text Recovery.
-    Re-parses isolated semantic sections using targeted regex patterns
-    to recover fields that the main contextual extractor missed.
-
-    LEGAL SAFETY GUARANTEE:
-    This function ONLY operates on actual OCR-extracted text passed in as arguments.
-    It NEVER fabricates, hallucinates, or invents legal facts.
-    If no match is found in the text, fields are left blank (None / not added).
     """
-    logger.info("Executing Real-Text Recovery on isolated legal sections (real OCR text only)...")
+    logger.info("Executing Real-Text Recovery on isolated sections...")
     recovered = {}
 
-    # 1. Recover Name — must be a proper-case 2-3 word name from the petitioner block
     name_m = re.search(r'\b(?:injured|deceased|claimant|petitioner|late shri)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})', petitioner_details)
     if name_m:
         recovered["name"] = name_m.group(1).strip()
 
-    # 2. Recover Age — explicit age/aged keyword match only
     age_m = re.search(r'\b(?:age|aged|approximately)\s*(\d{1,2})\b', petitioner_details + " " + compensation_paragraphs)
     if age_m:
         recovered["age"] = int(age_m.group(1))
 
-    # 3. Recover Income — requires explicit income/salary keyword in the compensation block
     inc_m = re.search(r'\b(?:monthly\s+income|salary|earning|coolie|wages?)\b.*?(\d{4,6})\b', compensation_paragraphs)
     if inc_m:
         recovered["monthly_income"] = float(inc_m.group(1))
 
-    # 4. Recover Dependents — explicit count near the word 'dependents' or 'family members'
     dep_m = re.search(r'\b(\d{1,2})\s*(?:dependents?|family\s+members)\b', petitioner_details)
     if dep_m:
         recovered["dependents"] = int(dep_m.group(1))
 
-    # 5. Recover Award Amount — only from explicit award/compensation keywords
     aw_m = re.search(r'\b(?:awarded|compensation\s+of\s+rs\.?|tribunal\s+awards)\s*([\d,\.]+)\b', award_section)
     if aw_m:
         recovered["award_amount"] = parse_indian_rupee_value(aw_m.group(1))
@@ -506,122 +846,120 @@ def real_text_recovery(petitioner_details, prayer_section, compensation_paragrap
     return recovered
 
 
+def extract_dates_with_context(text):
+    date_pattern = r'\b(\d{1,2})[-/\.](\d{1,2})[-/\.](\d{4})\b'
+    matches = []
+    for m in re.finditer(date_pattern, text):
+        try:
+            d_str = f"{int(m.group(1)):02d}-{int(m.group(2)):02d}-{m.group(3)}"
+            start = max(0, m.start() - 40)
+            end = min(len(text), m.end() + 12)
+            context = text[start:end].lower()
+            matches.append((d_str, context))
+        except ValueError:
+            pass
+    return matches
+
+
 def parse_extracted_text(text_lines):
     """
-    Highly advanced Section-Aware Legal Semantic Parser.
-    Uses section blocks and positional fallbacks to achieve high precision mapping.
+    Highly advanced Section-Aware Legal Semantic Parser / Legal Document Intelligence Engine.
+    Uses fuzzy heading matching, dynamic section boundary detection, fallback layout-hint clustering,
+    section priority rules, entity contamination filters, page importance/citation suppression,
+    chronological parsing, compensation table extraction, and detailed confidence tracking.
     """
-    merged_lines = merge_ocr_lines_to_paragraphs(text_lines)
-    full_text = "\n".join(merged_lines)
-    full_text_lower = full_text.lower()
-
-    # Create Line-to-Page map for page prioritisation (Requirement 10)
-    line_page_map = {}
-    current_page = 1
+    # 1. Segment text_lines into pages
+    pages = []
+    current_page_num = 1
+    current_page_lines = []
+    
     for line in text_lines:
         line_strip = line.strip()
         if line_strip.startswith("--- PAGE"):
+            if current_page_lines:
+                pages.append({
+                    "page_number": current_page_num,
+                    "lines": current_page_lines,
+                    "text": "\n".join(current_page_lines)
+                })
             m = re.search(r'PAGE\s+(\d+)', line_strip, re.IGNORECASE)
             if m:
-                current_page = int(m.group(1))
-            continue
-        cleaned = clean_noisy_text(line)
-        if cleaned:
-            line_page_map[cleaned] = current_page
+                current_page_num = int(m.group(1))
+            current_page_lines = []
+        else:
+            current_page_lines.append(line)
+            
+    if current_page_lines or not pages:
+        pages.append({
+            "page_number": current_page_num,
+            "lines": current_page_lines,
+            "text": "\n".join(current_page_lines)
+        })
 
-    # ======================================================
-    # REQUIREMENT 1 & 2 — SECTION BLOCK DETECTION
-    # ======================================================
-    cleaned_lines = []
-    boilerplate_patterns = [
-        r'^\s*presented\s+on\s*[:\-]',
-        r'^\s*presented\s+by\s*[:\-]',
-        r'^\s*registry\s+notice',
-        r'^\s*in\s+the\s+court\s+of\b',
-        r'^\s*adjudication\s+sheet\b',
-        r'^\s*advocates?\s+for\b',
-        r'^\s*date\s+of\s+stamping\b',
-        r'^\s*stamps?\b',
-        r'^\s*office\s+use\s+only\b',
-        r'^\s*certified\s+copy\b',
-        r'^\s*read\s+by\s*:',
-        r'^\s*compared\s+by\s*:',
-        r'^\s*typed\s+by\s*:'
-    ]
-    for line in text_lines:
-        cleaned = clean_noisy_text(line)
-        if not cleaned:
-            continue
-        if any(re.search(pat, cleaned.lower()) for pat in boilerplate_patterns):
-            continue
-        cleaned_lines.append(cleaned)
+    # 2. Compute Page Importances & Legal Citation Suppression
+    page_importances = {}
+    for p in pages:
+        page_importances[p["page_number"]] = score_page_importance(p["text"], p["page_number"])
 
-    petition_start_kws = ["petitioner", "petitioners", "claimant", "claimants", "appellant", "appellants", "before the", "m.c.o.p"]
-    petition_stop_kws = ["prayer", "it is prayed", "respondent", "versus", "v.", "vs.", "award", "findings"]
-    petition_block = extract_section_block(cleaned_lines, petition_start_kws, petition_stop_kws)
+    # 3. Dynamic Section Detection & Boundary Determination
+    merged_lines = merge_ocr_lines_to_paragraphs(text_lines)
+    full_text = "\n".join(merged_lines)
+    full_text_lower = full_text.lower()
     
-    prayer_start_kws = ["prayer", "it is prayed", "claim petition", "seeking compensation", "prays for"]
-    prayer_stop_kws = ["award", "decree", "negligence", "respondent", "findings", "order"]
-    prayer_block = extract_section_block(cleaned_lines, prayer_start_kws, prayer_stop_kws)
-    
-    award_start_kws = ["tribunal awarded", "award amount", "enhanced compensation", "compensation awarded", "tribunal", "final order", "award is passed", "award decree"]
-    award_stop_kws = ["precedents", "referred case", "versus", "vs."]
-    award_block = extract_section_block(cleaned_lines, award_start_kws, award_stop_kws)
+    sections_metadata = detect_document_sections(full_text, pages)
+    sections = {name: info["content"] for name, info in sections_metadata.items()}
+    sections["raw_ocr"] = full_text
 
-    # Position-based fallbacks for empty blocks (Requirement 10 & 2)
-    total_lines = len(cleaned_lines)
+    # Populate backward-compatible blocks
+    petition_block = sections.get("claimant_section", "") or sections.get("chronological_events_section", "") or sections.get("accident_section", "")
+    prayer_block = sections.get("relief_section", "")
+    award_block = sections.get("compensation_section", "") or sections.get("award_copy_section", "")
+    
+    total_lines = len(merged_lines)
     if not petition_block:
         cutoff = max(10, int(total_lines * 0.35))
-        petition_block = "\n".join(cleaned_lines[:cutoff])
+        petition_block = "\n".join(merged_lines[:cutoff])
         
     if not prayer_block:
         start_idx = int(total_lines * 0.3)
         end_idx = int(total_lines * 0.7)
-        prayer_block = "\n".join(cleaned_lines[start_idx:end_idx])
+        prayer_block = "\n".join(merged_lines[start_idx:end_idx])
         
     if not award_block:
         start_idx = int(total_lines * 0.6)
-        award_block = "\n".join(cleaned_lines[start_idx:])
-
-    # Package all blocks into a unified dictionary for extractors
-    section_blocks = {
-        "petition_block": petition_block,
-        "prayer_block": prayer_block,
-        "award_block": award_block,
-        "raw_ocr": full_text
-    }
+        award_block = "\n".join(merged_lines[start_idx:])
 
     # Helper for contextual extraction parameters
     parser_debug = {}
 
     # ======================================================
-    # REQUIREMENT 3 — CLAIMANT EXTRACTION ONLY FROM PETITION BLOCK
+    # FIELD EXTRACTION WITH SECTION PRIORITIZATION & CONTAMINATION FILTERS
     # ======================================================
+
+    # 1. Claimant Name extraction
     claimant_patterns = [
         r'(?:name\s+of\s+)?(?:injured|claimant|victim)\s*(?:name)?\s*[:\-]\s*(.*)',
         r'petitioner\s*(?:name)?\s*[:\-]\s*(.*)',
         r'\bshri\b\s*(.*)'
     ]
-    claimant_name, conf_claimant_name, sec_claimant_name = contextual_extract(
-        claimant_patterns, section_blocks, [("petition_block", 90)], type_cast=str,
-        field_name="claimant_name", debug_info=parser_debug, line_page_map=line_page_map
+    claimant_name, conf_claimant_name, sec_claimant_name, page_claimant_name = contextual_extract(
+        claimant_patterns, sections, [("claimant_section", 90), ("memo_of_appeal_section", 80)], type_cast=str,
+        field_name="claimant_name", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
     )
+    method_claimant_name = "Section-Aware Contextual Regex"
     if claimant_name: claimant_name = claimant_name.title()
 
-    # REQUIREMENT 6 — LATE SHRI/SMT DECEASED REFERENCE HANDLING
-    deceased_name = None
-    conf_deceased_name = 0.0
-    sec_deceased_name = "raw_ocr"
-
+    # 2. Deceased Name extraction
     dec_patterns = [
         r'(?:name\s+of\s+)?deceased\s*(?:name)?\s*[:\-]\s*(.*)',
         r'death\s+of\s+(.*)',
         r'late\s+(?:shri|smt)?\s*(.*)'
     ]
-    deceased_name, conf_deceased_name, sec_deceased_name = contextual_extract(
-        dec_patterns, section_blocks, [("petition_block", 90)], type_cast=str,
-        field_name="deceased_name", debug_info=parser_debug, line_page_map=line_page_map
+    deceased_name, conf_deceased_name, sec_deceased_name, page_deceased_name = contextual_extract(
+        dec_patterns, sections, [("claimant_section", 90), ("memo_of_appeal_section", 80)], type_cast=str,
+        field_name="deceased_name", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
     )
+    method_deceased_name = "Section-Aware Contextual Regex"
     if deceased_name: deceased_name = deceased_name.title()
 
     # Apply Deceased overrides (Requirement 6)
@@ -630,37 +968,46 @@ def parse_extracted_text(text_lines):
             deceased_name = claimant_name
             conf_deceased_name = conf_claimant_name
             sec_deceased_name = sec_claimant_name
+            page_deceased_name = page_claimant_name
+            method_deceased_name = method_claimant_name
         claimant_name = None
         conf_claimant_name = 0.0
-        sec_claimant_name = "petition_block"
+        sec_claimant_name = "claimant_section"
+        page_claimant_name = 1
+        method_claimant_name = "Deceased Override Check"
 
-    # Father / Husband Name from petition block
+    # 3. Father / Husband Name
     father_patterns = [
         r'(?:father|husband)\s*(?:s\s*)?name\s*[:\-]\s*(.*)',
         r'\bs\/o\b\s*(?:shri)?\s*(.*)',
         r'\bw\/o\b\s*(?:shri)?\s*(.*)'
     ]
-    father_name, conf_father_name, sec_father_name = contextual_extract(
-        father_patterns, section_blocks, [("petition_block", 90)], type_cast=str,
-        field_name="father_name", debug_info=parser_debug, line_page_map=line_page_map
+    father_name, conf_father_name, sec_father_name, page_father_name = contextual_extract(
+        father_patterns, sections, [("claimant_section", 90), ("memo_of_appeal_section", 80)], type_cast=str,
+        field_name="father_name", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
     )
+    method_father_name = "Section-Aware Contextual Regex"
     if father_name: father_name = father_name.title()
 
     # Splitting Claimant Inline Relationship
-    source_line = petition_block
+    source_line = sections.get("claimant_section", "")
     split_res = extract_relationship_entities(source_line)
     if split_res:
         c_split, rel_type, f_split = split_res
         if c_split:
             claimant_name = c_split.title()
             conf_claimant_name = max(conf_claimant_name, 0.95)
+            sec_claimant_name = "claimant_section"
+            method_claimant_name = "Relationship Splitting"
             if "claimant_name" in parser_debug:
                 parser_debug["claimant_name"]["final_extracted"] = claimant_name
                 parser_debug["claimant_name"]["stop_token_triggered"] = f"Relationship split '{rel_type}'"
         if f_split and (not father_name or len(father_name) < 3 or "date" in father_name.lower()):
             father_name = f_split.title()
             conf_father_name = max(conf_father_name, 0.95)
-            sec_father_name = "petition_block"
+            sec_father_name = "claimant_section"
+            page_father_name = find_exact_page(father_name, 1, 10, pages)
+            method_father_name = "Relationship Splitting"
             parser_debug["father_name"] = {
                 "matched_source_text": source_line[:200].strip(),
                 "regex_used": "Relationship split from Claimant",
@@ -669,190 +1016,266 @@ def parse_extracted_text(text_lines):
                 "final_extracted": father_name
             }
 
-    # Age only from petition block (Requirement 3)
+    # 4. Age only from claimant/petition section or chronological events
     age_patterns = [
         r'(?:aged\s+about|age\s+of\s+deceased|aged|approximately)\s*[:\-]?\s*(\d{1,2})\b',
         r'\b(\d{1,2})\s*years\s*(?:old)?\b'
     ]
-    age, conf_age, sec_age = contextual_extract(
-        age_patterns, section_blocks, [("petition_block", 95)], default_val="", type_cast=int,
-        field_name="age", debug_info=parser_debug, line_page_map=line_page_map
+    age, conf_age, sec_age, page_age = contextual_extract(
+        age_patterns, sections, [("claimant_section", 95), ("chronological_events_section", 80)], default_val="", type_cast=int,
+        field_name="age", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
     )
+    method_age = "Section-Aware Contextual Regex"
 
-    # Occupation only from petition block (Requirement 3)
+    # 5. Occupation only from claimant/petition section
     occ_patterns = [
         r'occupation\s*[:\-]\s*(.*)',
         r'employed\s+as\s+(.*)',
         r'working\s+as\s+(.*)',
         r'earning\s+as\s+(.*)'
     ]
-    occupation, conf_occupation, sec_occupation = contextual_extract(
-        occ_patterns, section_blocks, [("petition_block", 90)], default_val="", type_cast=str,
-        field_name="occupation", debug_info=parser_debug, line_page_map=line_page_map
+    occupation, conf_occupation, sec_occupation, page_occupation = contextual_extract(
+        occ_patterns, sections, [("claimant_section", 90), ("memo_of_appeal_section", 80)], default_val="", type_cast=str,
+        field_name="occupation", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
     )
+    method_occupation = "Section-Aware Contextual Regex"
     if occupation: occupation = occupation.title()
 
-    # Address/Place only from petition block (Requirement 3)
+    # 6. Place of accident
     place_regexes = [
         r'place\s+of\s+(?:accident|occurrence)\s*[:\-]\s*(.*)',
         r'accident\s+(?:occurred|took\s+place)\s+at\s+(.*)',
         r'accident\s+near\s+(.*)'
     ]
-    place_of_accident, conf_place_of_accident, sec_place_of_accident = contextual_extract(
-        place_regexes, section_blocks, [("petition_block", 95)], default_val="", type_cast=str,
-        field_name="place_of_accident", debug_info=parser_debug, line_page_map=line_page_map
+    place_of_accident, conf_place_of_accident, sec_place_of_accident, page_place_of_accident = contextual_extract(
+        place_regexes, sections, [("accident_section", 95), ("chronological_events_section", 90)], default_val="", type_cast=str,
+        field_name="place_of_accident", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
     )
+    method_place_of_accident = "Section-Aware Contextual Regex"
     if place_of_accident: place_of_accident = place_of_accident.title()
 
-    # Dependents & Marital Status only from petition block (Requirement 3)
+    # 7. Dependents only from claimant/petition section
     dependents_patterns = [
         r'\b(\d{1,2})\s*dependents\b',
         r'\bno\.\s*of\s*dependents?\s*(?:is|:)?\s*(\d{1,2})\b',
         r'\bnumber\s*of\s*dependents?\s*(?:is|:)?\s*(\d{1,2})\b'
     ]
-    dependents, conf_dependents, sec_dependents = contextual_extract(
-        dependents_patterns, section_blocks, [("petition_block", 95)], default_val="", type_cast=int,
-        field_name="dependents", debug_info=parser_debug, line_page_map=line_page_map
+    dependents, conf_dependents, sec_dependents, page_dependents = contextual_extract(
+        dependents_patterns, sections, [("claimant_section", 95), ("memo_of_appeal_section", 80)], default_val="", type_cast=int,
+        field_name="dependents", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
     )
+    method_dependents = "Section-Aware Contextual Regex"
 
+    # 8. Marital Status from claimant section
     marital_status = "married"
     conf_marital_status = 0.50
     sec_marital_status = "raw_ocr"
+    page_marital_status = 1
+    method_marital_status = "Default Heuristic"
     marital_patterns = {
         "married": ["married", "husband", "wife", "spouse"],
         "single": ["single", "unmarried", "bachelor", "spinster", "divorced"]
     }
+    claimant_sec_text = sections.get("claimant_section", "").lower()
     for status, keywords in marital_patterns.items():
-        if any(kw in petition_block.lower() for kw in keywords):
+        if any(kw in claimant_sec_text for kw in keywords):
             marital_status = status
             conf_marital_status = 0.90
-            sec_marital_status = "petition_block"
+            sec_marital_status = "claimant_section"
+            sec_meta = sections_metadata.get("claimant_section", {})
+            page_marital_status = find_exact_page(status, sec_meta.get("start_page", 1), sec_meta.get("end_page", 1), pages)
+            method_marital_status = "Keyword Matching"
             break
 
     # ======================================================
-    # REQUIREMENT 4 — COMPENSATION EXTRACTION ONLY FROM AWARD BLOCK
+    # QUANTITATIVE AND COMPENSATION TABLE EXTRACTION
     # ======================================================
+
+    comp_fields = extract_compensation_table_fields(sections.get("compensation_section", "") or sections.get("award_copy_section", ""))
     
-    # 1. Monthly income contextual extraction (Requirement 9)
-    income_patterns = [
-        r'(?:monthly\s+income|salary|earning|notional\s+income|coolie|wages?)\s*(?:is|was|of|@)?\s*(?:rs\.?|inr)?\s*([\d,\.\s]+lakhs?|[\d,\.\s]+lacs?|[\d,\.\s]+)\b',
-        r'\b(?:rs\.?|inr)\s*([\d,\.]+)\s*(?:per\s*month|\/pm|\/-\s*pm|p\.m\.)'
-    ]
-    monthly_income, conf_monthly_income, sec_monthly_income = contextual_extract(
-        income_patterns, section_blocks, [("award_block", 95), ("petition_block", 85)], default_val="", type_cast=float,
-        field_name="monthly_income", debug_info=parser_debug, line_page_map=line_page_map
-    )
+    # 9.1 Monthly Income
+    monthly_income = comp_fields["monthly_income"]
+    if monthly_income:
+        conf_monthly_income = 0.98
+        sec_monthly_income = "compensation_section"
+        sec_meta = sections_metadata.get("compensation_section", {}) or sections_metadata.get("award_copy_section", {})
+        page_monthly_income = find_exact_page(int(monthly_income), sec_meta.get("start_page", 1), sec_meta.get("end_page", 1), pages)
+        method_monthly_income = "Compensation Table Extraction"
+    else:
+        income_patterns = [
+            r'(?:monthly\s+income|salary|earning|notional\s+income|coolie|wages?)\s*(?:is|was|of|@)?\s*(?:rs\.?|inr)?\s*([\d,\.\s]+lakhs?|[\d,\.\s]+lacs?|[\d,\.\s]+)\b',
+            r'\b(?:rs\.?|inr)\s*([\d,\.]+)\s*(?:per\s*month|\/pm|\/-\s*pm|p\.m\.)'
+        ]
+        monthly_income, conf_monthly_income, sec_monthly_income, page_monthly_income = contextual_extract(
+            income_patterns, sections, [("compensation_section", 95), ("award_copy_section", 90)], default_val="", type_cast=float,
+            field_name="monthly_income", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
+        )
+        method_monthly_income = "Section-Aware Contextual Regex"
 
-    # 2. Multiplier only from award block
-    multiplier_patterns = [
-        r'multiplier\s*(?:of|is|applied)?\s*(\d{1,2})\b',
-        r'applied\s+multiplier\s+of\s*(\d{1,2})\b',
-        r'\b(\d{1,2})\s*multiplier\b'
-    ]
-    multiplier, conf_multiplier, sec_multiplier = contextual_extract(
-        multiplier_patterns, section_blocks, [("award_block", 95)], default_val="", type_cast=int,
-        field_name="multiplier", debug_info=parser_debug, line_page_map=line_page_map
-    )
+    # 9.2 Multiplier
+    multiplier = comp_fields["multiplier"]
+    if multiplier:
+        conf_multiplier = 0.98
+        sec_multiplier = "compensation_section"
+        sec_meta = sections_metadata.get("compensation_section", {}) or sections_metadata.get("award_copy_section", {})
+        page_multiplier = find_exact_page(int(multiplier), sec_meta.get("start_page", 1), sec_meta.get("end_page", 1), pages)
+        method_multiplier = "Compensation Table Extraction"
+    else:
+        multiplier_patterns = [
+            r'multiplier\s*(?:of|is|applied)?\s*(\d{1,2})\b',
+            r'applied\s+multiplier\s+of\s*(\d{1,2})\b',
+            r'\b(\d{1,2})\s*multiplier\b'
+        ]
+        multiplier, conf_multiplier, sec_multiplier, page_multiplier = contextual_extract(
+            multiplier_patterns, sections, [("compensation_section", 95), ("award_copy_section", 90)], default_val="", type_cast=int,
+            field_name="multiplier", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
+        )
+        method_multiplier = "Section-Aware Contextual Regex"
 
-    # 3. Future prospects only from award block
-    prospects_patterns = [
-        r'future\s+prospects?\s*(?:of|at|is|@)?\s*(\d{1,2})\s*%',
-        r'addition\s+of\s*(\d{1,2})\s*%\s*(?:towards)?\s*future\s+prospects'
-    ]
-    future_prospect, conf_future_prospect, sec_future_prospect = contextual_extract(
-        prospects_patterns, section_blocks, [("award_block", 95)], default_val="", type_cast=float,
-        field_name="future_prospect", debug_info=parser_debug, line_page_map=line_page_map
-    )
+    # 9.3 Future Prospect
+    future_prospect = comp_fields["future_prospect"]
+    if future_prospect:
+        conf_future_prospect = 0.98
+        sec_future_prospect = "compensation_section"
+        sec_meta = sections_metadata.get("compensation_section", {}) or sections_metadata.get("award_copy_section", {})
+        page_future_prospect = find_exact_page(int(future_prospect), sec_meta.get("start_page", 1), sec_meta.get("end_page", 1), pages)
+        method_future_prospect = "Compensation Table Extraction"
+    else:
+        prospects_patterns = [
+            r'future\s+prospects?\s*(?:of|at|is|@)?\s*(\d{1,2})\s*%',
+            r'addition\s+of\s*(\d{1,2})\s*%\s*(?:towards)?\s*future\s+prospects'
+        ]
+        future_prospect, conf_future_prospect, sec_future_prospect, page_future_prospect = contextual_extract(
+            prospects_patterns, sections, [("compensation_section", 95), ("award_copy_section", 90)], default_val="", type_cast=float,
+            field_name="future_prospect", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
+        )
+        method_future_prospect = "Section-Aware Contextual Regex"
 
-    # 4. Consortium, Funeral & Estate only from award block
-    cons_patterns = [r'consortium\s*(?:of)?\s*(?:rs\.?|inr)?\s*(\d{4,6})\b']
-    consortium, conf_consortium, sec_consortium = contextual_extract(
-        cons_patterns, section_blocks, [("award_block", 95)], default_val=40000.0, type_cast=float,
-        field_name="consortium", debug_info=parser_debug, line_page_map=line_page_map
-    )
+    # 9.4 Consortium
+    consortium = comp_fields["consortium"]
+    if consortium:
+        conf_consortium = 0.98
+        sec_consortium = "compensation_section"
+        sec_meta = sections_metadata.get("compensation_section", {}) or sections_metadata.get("award_copy_section", {})
+        page_consortium = find_exact_page(int(consortium), sec_meta.get("start_page", 1), sec_meta.get("end_page", 1), pages)
+        method_consortium = "Compensation Table Extraction"
+    else:
+        cons_patterns = [r'consortium\s*(?:of)?\s*(?:rs\.?|inr)?\s*(\d{4,6})\b']
+        consortium, conf_consortium, sec_consortium, page_consortium = contextual_extract(
+            cons_patterns, sections, [("compensation_section", 95), ("award_copy_section", 90)], default_val=40000.0, type_cast=float,
+            field_name="consortium", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
+        )
+        method_consortium = "Section-Aware Contextual Regex"
 
-    fun_patterns = [r'funeral\s*(?:expenses)?\s*(?:of)?\s*(?:rs\.?|inr)?\s*(\d{4,6})\b']
-    funeral_expenses, conf_funeral_expenses, sec_funeral_expenses = contextual_extract(
-        fun_patterns, section_blocks, [("award_block", 95)], default_val=15000.0, type_cast=float,
-        field_name="funeral_expenses", debug_info=parser_debug, line_page_map=line_page_map
-    )
+    # 9.5 Funeral Expenses
+    funeral_expenses = comp_fields["funeral_expenses"]
+    if funeral_expenses:
+        conf_funeral_expenses = 0.98
+        sec_funeral_expenses = "compensation_section"
+        sec_meta = sections_metadata.get("compensation_section", {}) or sections_metadata.get("award_copy_section", {})
+        page_funeral_expenses = find_exact_page(int(funeral_expenses), sec_meta.get("start_page", 1), sec_meta.get("end_page", 1), pages)
+        method_funeral_expenses = "Compensation Table Extraction"
+    else:
+        fun_patterns = [r'funeral\s*(?:expenses)?\s*(?:of)?\s*(?:rs\.?|inr)?\s*(\d{4,6})\b']
+        funeral_expenses, conf_funeral_expenses, sec_funeral_expenses, page_funeral_expenses = contextual_extract(
+            fun_patterns, sections, [("compensation_section", 95), ("award_copy_section", 90)], default_val=15000.0, type_cast=float,
+            field_name="funeral_expenses", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
+        )
+        method_funeral_expenses = "Section-Aware Contextual Regex"
 
-    est_patterns = [r'(?:loss\s+of\s+)?estate\s*(?:of)?\s*(?:rs\.?|inr)?\s*(\d{4,6})\b']
-    estate_loss, conf_estate_loss, sec_estate_loss = contextual_extract(
-        est_patterns, section_blocks, [("award_block", 95)], default_val=15000.0, type_cast=float,
-        field_name="estate_loss", debug_info=parser_debug, line_page_map=line_page_map
-    )
+    # 9.6 Total Compensation
+    total_compensation = comp_fields["total_compensation"]
+    if total_compensation:
+        conf_total_compensation = 0.98
+        sec_total_compensation = "compensation_section"
+        sec_meta = sections_metadata.get("compensation_section", {}) or sections_metadata.get("award_copy_section", {})
+        page_total_compensation = find_exact_page(int(total_compensation), sec_meta.get("start_page", 1), sec_meta.get("end_page", 1), pages)
+        method_total_compensation = "Compensation Table Extraction"
+    else:
+        award_patterns = [
+            r'(?:awarded|compensation\s+of\s+rs\.?|tribunal\s+awards|granted\s+compensation\s+of\s+rs\.?)\s*([\d,\.\s]+lakhs?|[\d,\.\-\/]+)\b',
+            r'\b(?:awarded\s+sum\s+of|compensation\s+amount\s+of|total\s+compensation\s+of)\s*(?:rs\.?|inr)?\s*([\d,\.\-\/]+)\b'
+        ]
+        total_compensation, conf_total_compensation, sec_total_compensation, page_total_compensation = contextual_extract(
+            award_patterns, sections, [("compensation_section", 95), ("award_copy_section", 90)], default_val="", type_cast=float,
+            field_name="total_compensation", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
+        )
+        method_total_compensation = "Section-Aware Contextual Regex"
 
-    # 5. Disability only from award block
+    # 9.7 Disability
     disability_patterns = [
         r'\b(\d{1,2}(?:\.\d+)?)\s*%\s*(?:permanent)?\s*disability\b',
         r'\bdisability\b\s*(?:of|is|:)?\s*(\d{1,2}(?:\.\d+)?)\s*%'
     ]
-    disability, conf_disability, sec_disability = contextual_extract(
-        disability_patterns, section_blocks, [("award_block", 95)], default_val="", type_cast=float,
-        field_name="disability", debug_info=parser_debug, line_page_map=line_page_map
+    disability, conf_disability, sec_disability, page_disability = contextual_extract(
+        disability_patterns, sections, [("compensation_section", 95), ("award_copy_section", 90)], default_val="", type_cast=float,
+        field_name="disability", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
     )
+    method_disability = "Section-Aware Contextual Regex"
 
-    # 6. Tribunal Total Compensation Award only from award block
-    award_patterns = [
-        r'(?:awarded|compensation\s+of\s+rs\.?|tribunal\s+awards|granted\s+compensation\s+of\s+rs\.?)\s*([\d,\.\s]+lakhs?|[\d,\.\-\/]+)\b',
-        r'\b(?:awarded\s+sum\s+of|compensation\s+amount\s+of|total\s+compensation\s+of)\s*(?:rs\.?|inr)?\s*([\d,\.\-\/]+)\b'
-    ]
-    total_compensation, conf_total_compensation, sec_total_compensation = contextual_extract(
-        award_patterns, section_blocks, [("award_block", 95)], default_val="", type_cast=float,
-        field_name="total_compensation", debug_info=parser_debug, line_page_map=line_page_map
+    # 9.8 Estate Loss
+    est_patterns = [r'(?:loss\s+of\s+)?estate\s*(?:of)?\s*(?:rs\.?|inr)?\s*(\d{4,6})\b']
+    estate_loss, conf_estate_loss, sec_estate_loss, page_estate_loss = contextual_extract(
+        est_patterns, sections, [("compensation_section", 95), ("award_copy_section", 90)], default_val=15000.0, type_cast=float,
+        field_name="estate_loss", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
     )
+    method_estate_loss = "Section-Aware Contextual Regex"
 
-    # ======================================================
-    # REQUIREMENT 5 — PRAYER EXTRACTION ONLY FROM PRAYER BLOCK
-    # ======================================================
+    # 10. Prayer Amount / Prayer Section
     prayer_patterns = [
         r'(?:prayer|relief\s+claimed|claims?\s+compensation\s+of|prays\s+for)\s*(?:rs\.?|inr)?\s*([\d,\.\s]+lakhs?|[\d,\.\-\/]+)\b',
         r'\b(?:claims?\s+sum\s+of|seeking\s+compensation\s+of)\s*(?:rs\.?|inr)?\s*([\d,\.\-\/]+)\b'
     ]
-    prayer, conf_prayer, sec_prayer = contextual_extract(
-        prayer_patterns, section_blocks, [("prayer_block", 95)], default_val="", type_cast=str,
-        field_name="prayer", debug_info=parser_debug, line_page_map=line_page_map
+    prayer, conf_prayer, sec_prayer, page_prayer = contextual_extract(
+        prayer_patterns, sections, [("relief_section", 95)], default_val="", type_cast=str,
+        field_name="prayer", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
     )
+    method_prayer = "Section-Aware Contextual Regex"
 
     # ======================================================
-    # Dates & DOB (searched in petition_block / early pages)
+    # CHRONOLOGICAL DATES EXTRACTION
     # ======================================================
-    date_pattern = r'\b(\d{1,2})[-/\.](\d{1,2})[-/\.](\d{4})\b'
     
-    def extract_dates_with_context(text):
-        matches = []
-        for m in re.finditer(date_pattern, text):
-            try:
-                d_str = f"{int(m.group(1)):02d}-{int(m.group(2)):02d}-{m.group(3)}"
-                start = max(0, m.start() - 40)
-                end = min(len(text), m.end() + 12)
-                context = text[start:end].lower()
-                matches.append((d_str, context))
-            except ValueError:
-                pass
-        return matches
+    chronology = parse_chronological_events(sections.get("chronological_events_section", "") or sections.get("index_section", "") or full_text)
+    
+    # Accident Date
+    date_of_accident = chronology["date_of_accident"]
+    if date_of_accident:
+        conf_date_of_accident = 0.98
+        sec_date_of_accident = "chronological_events_section"
+        sec_meta = sections_metadata.get("chronological_events_section", {})
+        page_date_of_accident = find_exact_page(date_of_accident, sec_meta.get("start_page", 1), sec_meta.get("end_page", 1), pages)
+        method_date_of_accident = "Chronological Event Extraction"
+    else:
+        date_of_accident = ""
+        conf_date_of_accident = 0.40
+        sec_date_of_accident = "raw_ocr"
+        page_date_of_accident = 1
+        method_date_of_accident = "Fallback Contextual Search"
+        
+        acc_dates = extract_dates_with_context(sections.get("claimant_section", "") or full_text)
+        for d_val, ctx in acc_dates:
+            if any(kw in ctx for kw in ["accident", "incident", "occurrence", "happened on", "occurred on", "collision", "crash", "fir"]):
+                date_of_accident = d_val
+                conf_date_of_accident = 0.95
+                sec_date_of_accident = "claimant_section" if d_val in sections.get("claimant_section", "") else "raw_ocr"
+                page_date_of_accident = find_exact_page(d_val, 1, 10, pages)
+                break
 
-    date_of_accident = ""
-    conf_date_of_accident = 0.40
-    sec_date_of_accident = "raw_ocr"
-    acc_dates = extract_dates_with_context(petition_block) + extract_dates_with_context(full_text)
-    for d_val, ctx in acc_dates:
-        if any(kw in ctx for kw in ["accident", "incident", "occurrence", "happened on", "occurred on", "collision", "crash", "fir"]):
-            date_of_accident = d_val
-            conf_date_of_accident = 0.95
-            sec_date_of_accident = "petition_block" if d_val in petition_block else "raw_ocr"
-            break
-
+    # Birth Date
     date_of_birth = ""
     conf_date_of_birth = 0.40
     sec_date_of_birth = "raw_ocr"
-    dob_dates = extract_dates_with_context(petition_block) + extract_dates_with_context(full_text)
+    page_date_of_birth = 1
+    method_date_of_birth = "Fallback Contextual Search"
+    
+    dob_dates = extract_dates_with_context(sections.get("claimant_section", "") or full_text)
     for d_val, ctx in dob_dates:
         if any(kw in ctx for kw in ["dob", "date of birth", "born on", "birth", "d.o.b"]):
             date_of_birth = d_val
             conf_date_of_birth = 0.95
-            sec_date_of_birth = "petition_block" if d_val in petition_block else "raw_ocr"
+            sec_date_of_birth = "claimant_section" if d_val in sections.get("claimant_section", "") else "raw_ocr"
+            page_date_of_birth = find_exact_page(d_val, 1, 10, pages)
             break
 
     # ======================================================
@@ -880,6 +1303,14 @@ def parse_extracted_text(text_lines):
         else: expected_prospects = 0.0
 
     compensation_table = parse_compensation_table(award_block)
+    
+    # Synchronize table extraction values with compensation_table
+    if not compensation_table:
+        compensation_table = {}
+    for k, v in comp_fields.items():
+        if v and k not in ["monthly_income", "multiplier", "future_prospect", "deduction", "total_compensation"]:
+            head_title = k.replace("_", " ").title()
+            compensation_table[head_title] = v
 
     # Classification logic
     enhancement_reduction_request = "enhancement"
@@ -945,10 +1376,10 @@ def parse_extracted_text(text_lines):
 
     if date_of_birth and date_of_accident:
         try:
-            dob = datetime.strptime(date_of_birth, "%d-%m-%Y")
-            doa = datetime.strptime(date_of_accident, "%d-%m-%Y")
-            calc_age = doa.year - dob.year
-            if doa.month < dob.month or (doa.month == dob.month and doa.day < dob.day):
+            dob_val = datetime.strptime(date_of_birth, "%d-%m-%Y")
+            doa_val = datetime.strptime(date_of_accident, "%d-%m-%Y")
+            calc_age = doa_val.year - dob_val.year
+            if doa_val.month < dob_val.month or (doa_val.month == dob_val.month and doa_val.day < dob_val.day):
                 calc_age -= 1
             if 0 <= calc_age <= 100:
                 if age != calc_age:
@@ -1058,34 +1489,46 @@ def parse_extracted_text(text_lines):
             claimant_name = recovered["name"]
             conf_claimant_name = 0.85
             sec_claimant_name = "AI Recovery"
+            page_claimant_name = 1
+            method_claimant_name = "AI RealTextRecovery Fallback"
             
         if not age and recovered.get("age"):
             age = recovered["age"]
             conf_age = 0.85
             sec_age = "AI Recovery"
+            page_age = 1
+            method_age = "AI RealTextRecovery Fallback"
             
         if not monthly_income and recovered.get("monthly_income"):
             monthly_income = recovered["monthly_income"]
             conf_monthly_income = 0.85
             sec_monthly_income = "AI Recovery"
+            page_monthly_income = 1
+            method_monthly_income = "AI RealTextRecovery Fallback"
             
         if not dependents and recovered.get("dependents"):
             dependents = recovered["dependents"]
             conf_dependents = 0.85
             sec_dependents = "AI Recovery"
+            page_dependents = 1
+            method_dependents = "AI RealTextRecovery Fallback"
             
         if (not total_compensation or total_compensation <= 0 or conf_total_compensation < 0.70) and recovered.get("award_amount"):
             total_compensation = recovered["award_amount"]
             conf_total_compensation = 0.85
             sec_total_compensation = "AI Recovery"
+            page_total_compensation = 1
+            method_total_compensation = "AI RealTextRecovery Fallback"
 
         if not age and date_of_birth and date_of_accident:
             try:
-                dob = datetime.strptime(date_of_birth, "%d-%m-%Y")
-                doa = datetime.strptime(date_of_accident, "%d-%m-%Y")
-                age = doa.year - dob.year
+                dob_val = datetime.strptime(date_of_birth, "%d-%m-%Y")
+                doa_val = datetime.strptime(date_of_accident, "%d-%m-%Y")
+                age = doa_val.year - dob_val.year
                 conf_age = 0.80
                 sec_age = "raw_ocr"
+                page_age = 1
+                method_age = "Date Chronology Sync Fallback"
             except ValueError:
                 pass
                 
@@ -1095,6 +1538,8 @@ def parse_extracted_text(text_lines):
                 age = int(m.group(1))
                 conf_age = 0.75
                 sec_age = "petition_block"
+                page_age = 1
+                method_age = "Local Age Regex Fallback"
 
         if not occupation:
             occ_keywords = ["service", "driver", "agriculture", "farmer", "supervisor", "teacher", "business", "laborer", "coolie", "shopkeeper", "student", "housewife"]
@@ -1103,6 +1548,8 @@ def parse_extracted_text(text_lines):
                     occupation = occ.title()
                     conf_occupation = 0.70
                     sec_occupation = "petition_block"
+                    page_occupation = 1
+                    method_occupation = "Keyword Extraction Fallback"
                     break
 
         if not monthly_income:
@@ -1111,16 +1558,22 @@ def parse_extracted_text(text_lines):
                 monthly_income = float(m.group(1))
                 conf_monthly_income = 0.75
                 sec_monthly_income = "petition_block"
+                page_monthly_income = 1
+                method_monthly_income = "Regex Local Income Fallback"
 
         if not multiplier and expected_multiplier:
             multiplier = expected_multiplier
             conf_multiplier = 0.70
             sec_multiplier = "raw_ocr"
+            page_multiplier = 1
+            method_multiplier = "Age expected multiplier sync"
 
         if not future_prospect and expected_prospects:
             future_prospect = expected_prospects
             conf_future_prospect = 0.70
             sec_future_prospect = "raw_ocr"
+            page_future_prospect = 1
+            method_future_prospect = "Age expected prospects sync"
 
         if not prayer:
             prayers_kws = ["appeal allowed", "compensation be enhanced", "enhanced", "award be passed", "prays for"]
@@ -1129,6 +1582,8 @@ def parse_extracted_text(text_lines):
                     prayer = f"The claimant prays that the {p_kw}."
                     conf_prayer = 0.70
                     sec_prayer = "prayer_block"
+                    page_prayer = 1
+                    method_prayer = "Keyword Extraction Fallback"
                     break
 
         excessive_deviation = False
@@ -1144,6 +1599,8 @@ def parse_extracted_text(text_lines):
             total_compensation = round(reconstructed_compensation, 2)
             conf_total_compensation = 0.80
             sec_total_compensation = "award_block"
+            page_total_compensation = 1
+            method_total_compensation = "Reconstructed Math Sync"
 
         if excessive_deviation:
             conf_total_compensation = min(conf_total_compensation, 0.60)
@@ -1266,26 +1723,166 @@ def parse_extracted_text(text_lines):
         "_debug": parser_debug,
         
         "confidence_scores": {
-            "deceased_name": {"value": deceased_name, "confidence": conf_deceased_name, "source": sec_deceased_name, "source_section": sec_deceased_name},
-            "claimant_name": {"value": claimant_name, "confidence": conf_claimant_name, "source": sec_claimant_name, "source_section": sec_claimant_name},
-            "name": {"value": claimant_name or deceased_name, "confidence": conf_claimant_name, "source": sec_claimant_name, "source_section": sec_claimant_name},
-            "father_name": {"value": father_name, "confidence": conf_father_name, "source": sec_father_name, "source_section": sec_father_name},
-            "date_of_accident": {"value": date_of_accident, "confidence": conf_date_of_accident, "source": sec_date_of_accident, "source_section": sec_date_of_accident},
-            "date_of_birth": {"value": date_of_birth, "confidence": conf_date_of_birth, "source": sec_date_of_birth, "source_section": sec_date_of_birth},
-            "age": {"value": age, "confidence": conf_age, "source": sec_age, "source_section": sec_age},
-            "occupation": {"value": occupation, "confidence": conf_occupation, "source": sec_occupation, "source_section": sec_occupation},
-            "monthly_income": {"value": monthly_income, "confidence": conf_monthly_income, "source": sec_monthly_income, "source_section": sec_monthly_income},
-            "multiplier": {"value": multiplier, "confidence": conf_multiplier, "source": sec_multiplier, "source_section": sec_multiplier},
-            "future_prospect": {"value": future_prospect, "confidence": conf_future_prospect, "source": sec_future_prospect, "source_section": sec_future_prospect},
-            "consortium": {"value": consortium, "confidence": conf_consortium, "source": sec_consortium, "source_section": sec_consortium},
-            "funeral_expenses": {"value": funeral_expenses, "confidence": conf_funeral_expenses, "source": sec_funeral_expenses, "source_section": sec_funeral_expenses},
-            "total_compensation": {"value": total_compensation, "confidence": conf_total_compensation, "source": sec_total_compensation, "source_section": sec_total_compensation},
-            "prayer": {"value": prayer, "confidence": conf_prayer, "source": sec_prayer, "source_section": sec_prayer},
-            "citations": {"value": citations, "confidence": conf_citations, "source": "cited_judgments", "source_section": "cited_judgments"},
-            "place_of_accident": {"value": place_of_accident, "confidence": conf_place_of_accident, "source": sec_place_of_accident, "source_section": sec_place_of_accident},
-            "disability": {"value": disability, "confidence": conf_disability, "source": sec_disability, "source_section": sec_disability},
-            "dependents": {"value": dependents, "confidence": conf_dependents, "source": sec_dependents, "source_section": sec_dependents},
-            "marital_status": {"value": marital_status, "confidence": conf_marital_status, "source": sec_marital_status, "source_section": sec_marital_status}
+            "deceased_name": {
+                "value": deceased_name,
+                "confidence": conf_deceased_name,
+                "source": sec_deceased_name,
+                "source_section": sec_deceased_name,
+                "source_page": page_deceased_name,
+                "extraction_method": method_deceased_name
+            },
+            "claimant_name": {
+                "value": claimant_name,
+                "confidence": conf_claimant_name,
+                "source": sec_claimant_name,
+                "source_section": sec_claimant_name,
+                "source_page": page_claimant_name,
+                "extraction_method": method_claimant_name
+            },
+            "name": {
+                "value": claimant_name or deceased_name,
+                "confidence": conf_claimant_name,
+                "source": sec_claimant_name,
+                "source_section": sec_claimant_name,
+                "source_page": page_claimant_name,
+                "extraction_method": method_claimant_name
+            },
+            "father_name": {
+                "value": father_name,
+                "confidence": conf_father_name,
+                "source": sec_father_name,
+                "source_section": sec_father_name,
+                "source_page": page_father_name,
+                "extraction_method": method_father_name
+            },
+            "date_of_accident": {
+                "value": date_of_accident,
+                "confidence": conf_date_of_accident,
+                "source": sec_date_of_accident,
+                "source_section": sec_date_of_accident,
+                "source_page": page_date_of_accident,
+                "extraction_method": method_date_of_accident
+            },
+            "date_of_birth": {
+                "value": date_of_birth,
+                "confidence": conf_date_of_birth,
+                "source": sec_date_of_birth,
+                "source_section": sec_date_of_birth,
+                "source_page": page_date_of_birth,
+                "extraction_method": method_date_of_birth
+            },
+            "age": {
+                "value": age,
+                "confidence": conf_age,
+                "source": sec_age,
+                "source_section": sec_age,
+                "source_page": page_age,
+                "extraction_method": method_age
+            },
+            "occupation": {
+                "value": occupation,
+                "confidence": conf_occupation,
+                "source": sec_occupation,
+                "source_section": sec_occupation,
+                "source_page": page_occupation,
+                "extraction_method": method_occupation
+            },
+            "monthly_income": {
+                "value": monthly_income,
+                "confidence": conf_monthly_income,
+                "source": sec_monthly_income,
+                "source_section": sec_monthly_income,
+                "source_page": page_monthly_income,
+                "extraction_method": method_monthly_income
+            },
+            "multiplier": {
+                "value": multiplier,
+                "confidence": conf_multiplier,
+                "source": sec_multiplier,
+                "source_section": sec_multiplier,
+                "source_page": page_multiplier,
+                "extraction_method": method_multiplier
+            },
+            "future_prospect": {
+                "value": future_prospect,
+                "confidence": conf_future_prospect,
+                "source": sec_future_prospect,
+                "source_section": sec_future_prospect,
+                "source_page": page_future_prospect,
+                "extraction_method": method_future_prospect
+            },
+            "consortium": {
+                "value": consortium,
+                "confidence": conf_consortium,
+                "source": sec_consortium,
+                "source_section": sec_consortium,
+                "source_page": page_consortium,
+                "extraction_method": method_consortium
+            },
+            "funeral_expenses": {
+                "value": funeral_expenses,
+                "confidence": conf_funeral_expenses,
+                "source": sec_funeral_expenses,
+                "source_section": sec_funeral_expenses,
+                "source_page": page_funeral_expenses,
+                "extraction_method": method_funeral_expenses
+            },
+            "total_compensation": {
+                "value": total_compensation,
+                "confidence": conf_total_compensation,
+                "source": sec_total_compensation,
+                "source_section": sec_total_compensation,
+                "source_page": page_total_compensation,
+                "extraction_method": method_total_compensation
+            },
+            "prayer": {
+                "value": prayer,
+                "confidence": conf_prayer,
+                "source": sec_prayer,
+                "source_section": sec_prayer,
+                "source_page": page_prayer,
+                "extraction_method": method_prayer
+            },
+            "citations": {
+                "value": citations,
+                "confidence": conf_citations,
+                "source": "cited_judgments",
+                "source_section": "cited_judgments",
+                "source_page": 1,
+                "extraction_method": "Citation Pattern Matching"
+            },
+            "place_of_accident": {
+                "value": place_of_accident,
+                "confidence": conf_place_of_accident,
+                "source": sec_place_of_accident,
+                "source_section": sec_place_of_accident,
+                "source_page": page_place_of_accident,
+                "extraction_method": method_place_of_accident
+            },
+            "disability": {
+                "value": disability,
+                "confidence": conf_disability,
+                "source": sec_disability,
+                "source_section": sec_disability,
+                "source_page": page_disability,
+                "extraction_method": method_disability
+            },
+            "dependents": {
+                "value": dependents,
+                "confidence": conf_dependents,
+                "source": sec_dependents,
+                "source_section": sec_dependents,
+                "source_page": page_dependents,
+                "extraction_method": method_dependents
+            },
+            "marital_status": {
+                "value": marital_status,
+                "confidence": conf_marital_status,
+                "source": sec_marital_status,
+                "source_section": sec_marital_status,
+                "source_page": page_marital_status,
+                "extraction_method": method_marital_status
+            }
         }
     }
 
