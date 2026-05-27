@@ -202,17 +202,17 @@ def preprocess_image_enhanced(pil_img):
 # HIGH-DPI RENDERING & OCR DEBUG UTILITIES
 # ======================================================
 
-def render_pdf_page_high_dpi(pdf_path: str, page_idx: int):
+def render_pdf_page_high_dpi(pdf_path: str, page_idx: int, scale: float = 3.0):
     """
-    Renders a specific page of a PDF at 220 DPI (scale=3.0) using pypdfium2.
+    Renders a specific page of a PDF at high DPI (default scale=3.0, approx 220 DPI) using pypdfium2.
     Highly reliable, fast, in-process rendering without requiring external binary dependencies like Poppler.
     """
     try:
         import pypdfium2 as pdfium
         doc = pdfium.PdfDocument(pdf_path)
         page = doc[page_idx]
-        bitmap = page.render(scale=1.5)
-        logger.info(f"Page {page_idx+1} rendered at scale 1.5 (110 DPI) using pypdfium2.")
+        bitmap = page.render(scale=scale)
+        logger.info(f"Page {page_idx+1} rendered at scale {scale} (approx {int(scale * 72)} DPI) using pypdfium2.")
         return bitmap.to_pil()
     except Exception as ex:
         logger.error(f"Failed to render page {page_idx+1} using pypdfium2: {str(ex)}")
@@ -436,7 +436,7 @@ def is_tesseract_available() -> bool:
 def perform_ocr_page_with_retry(ocr_engine, page_doc, page_idx: int, total_pages: int, pdf_path: str = None) -> tuple:
     """
     Performs stabilized OCR on a single PDF page.
-    1. Renders high-DPI page at 400 DPI.
+    1. Renders high-DPI page at 220 DPI.
     2. Applies safe, non-destructive preprocessing.
     3. Saves both original and processed debug images BEFORE OCR:
        - debug_original_{page_num}.png
@@ -450,12 +450,12 @@ def perform_ocr_page_with_retry(ocr_engine, page_doc, page_idx: int, total_pages
     page_num = page_idx + 1
     preprocessing_applied = ["grayscale", "bilateral_filter", "mild_clahe", "light_sharpening"]
 
-    # 1. Render at 400 DPI
+    # 1. Render at 220 DPI
     if pdf_path:
-        original_pil = render_pdf_page_high_dpi(pdf_path, page_idx)
+        original_pil = render_pdf_page_high_dpi(pdf_path, page_idx, scale=3.0)
     else:
         # Fallback to page_doc render if path is somehow not provided
-        bitmap = page_doc.render(scale=1.5)
+        bitmap = page_doc.render(scale=3.0)
         original_pil = bitmap.to_pil()
 
     # 2. Safe preprocessing

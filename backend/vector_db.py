@@ -63,34 +63,77 @@ def get_embedding_model():
 # CHUNKING & INDEXING PIPELINE
 # ======================================================
 
-def chunk_text(text: str, chunk_size: int = 600, overlap: int = 100) -> list:
-    """Splits text into overlapping paragraphs/chunks for semantic search."""
-    paragraphs = text.split("\n\n")
+def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> list:
+    """
+    Intelligently chunks legal document text for optimal semantic retrieval.
+    Guarantees that chunks:
+    1. Do not slice raw characters or cut words in half.
+    2. Prefer splitting on paragraph (\n\n) or sentence (. ! ?) boundaries.
+    3. Keep complete legal facts and context intact.
+    """
+    import re
+    # Normalize newlines
+    text = text.replace("\r\n", "\n")
+    
+    # Split into paragraphs
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    
+    # If there are no double newlines, fallback to single newlines
+    if len(paragraphs) <= 1:
+        paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+        
     chunks = []
-    current_chunk = ""
+    current_chunk = []
+    current_length = 0
     
     for p in paragraphs:
-        p = p.strip()
-        if not p:
-            continue
-        if len(current_chunk) + len(p) <= chunk_size:
-            current_chunk += "\n\n" + p if current_chunk else p
+        # If a single paragraph is larger than chunk_size, split it into sentences
+        if len(p) > chunk_size:
+            # Simple sentence splitting regex
+            sentences = re.split(r'(?<=[.!?])\s+', p)
+            for s in sentences:
+                s = s.strip()
+                if not s:
+                    continue
+                if current_length + len(s) <= chunk_size:
+                    current_chunk.append(s)
+                    current_length += len(s) + 1 # +1 for space
+                else:
+                    if current_chunk:
+                        chunks.append(" ".join(current_chunk))
+                    current_chunk = [s]
+                    current_length = len(s)
         else:
-            if current_chunk:
-                chunks.append(current_chunk)
-            current_chunk = p
-            
+            if current_length + len(p) <= chunk_size:
+                current_chunk.append(p)
+                current_length += len(p) + 2 # +2 for \n\n
+            else:
+                if current_chunk:
+                    chunks.append("\n\n".join(current_chunk) if "\n\n" in text else "\n".join(current_chunk))
+                current_chunk = [p]
+                current_length = len(p)
+                
     if current_chunk:
-        chunks.append(current_chunk)
+        chunks.append("\n\n".join(current_chunk) if "\n\n" in text else "\n".join(current_chunk))
         
-    # If chunks are too sparse, fall back to sliding window on characters
-    if len(chunks) <= 1 and len(text) > chunk_size:
-        chunks = []
-        start = 0
-        while start < len(text):
-            end = min(start + chunk_size, len(text))
-            chunks.append(text[start:end])
-            start += chunk_size - overlap
+    # If chunks are still empty or somehow sparse, fallback to a safe word-boundary window
+    if not chunks:
+        words = text.split()
+        current_words = []
+        current_len = 0
+        for w in words:
+            if current_len + len(w) <= chunk_size:
+                current_words.append(w)
+                current_len += len(w) + 1
+            else:
+                if current_words:
+                    chunks.append(" ".join(current_words))
+                # Add overlap of ~20 words if possible
+                overlap_words = current_words[-20:] if len(current_words) > 20 else []
+                current_words = overlap_words + [w]
+                current_len = sum(len(x) + 1 for x in current_words)
+        if current_words:
+            chunks.append(" ".join(current_words))
             
     return chunks
 
@@ -106,7 +149,10 @@ def index_document(filename: str, text_lines: list, suggestions: dict) -> bool:
         logger.warning("Vector DB or Embedding model is offline. Skipping indexing.")
         return False
         
-    full_text = "\n".join(text_lines)
+    # Pre-merge OCR text lines into clean coherent paragraphs joined with double newlines
+    from backend.parser_heuristics import merge_ocr_lines_to_paragraphs
+    paragraphs = merge_ocr_lines_to_paragraphs(text_lines)
+    full_text = "\n\n".join(paragraphs)
     chunks = chunk_text(full_text)
     
     if not chunks:
