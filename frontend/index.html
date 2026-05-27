@@ -38,15 +38,6 @@
                     <i class="fa-solid fa-calculator-simple"></i>
                     <span>Workstation</span>
                 </button>
-                <button type="button" class="nav-item" data-tab="library">
-                    <i class="fa-solid fa-folder-open"></i>
-                    <span>Batch PDF Library</span>
-                    <span id="queue-badge" class="badge-count hidden">0</span>
-                </button>
-                <button type="button" class="nav-item" data-tab="chat">
-                    <i class="fa-solid fa-brain-circuit"></i>
-                    <span>AI Legal Chat</span>
-                </button>
             </nav>
 
             <div class="sidebar-footer">
@@ -201,121 +192,10 @@
                                 </div>
 
                                 <div class="form-group">
-                                    <label for="future_type">Future Prospects Category <span class="req">*</span></label>
-                                    <div class="select-wrapper">
-                                        <select id="future_type" name="future_type">
-                                            <option value="1">Permanent Salaried Job</option>
-                                            <option value="2" selected>Self-Employed / Casual Worker</option>
-                                        </select>
-                                        <i class="fa-solid fa-chevron-down select-arrow"></i>
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="consortium">Loss of Consortium (Rs.)</label>
+                                    <label for="future_prospect">Future Prospects (%) <span class="req">*</span></label>
                                     <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-handshake-angle field-icon"></i>
-                                        <input type="number" id="consortium" name="consortium" value="40000">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="loss_estate">Loss of Estate (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-briefcase field-icon"></i>
-                                        <input type="number" id="loss_estate" name="loss_estate" value="15000">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="funeral_expenses">Funeral Expenses (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-coffin field-icon"></i>
-                                        <input type="number" id="funeral_expenses" name="funeral_expenses" value="15000">
-                                    </div>
-                                </div>
-
-                                <div class="section-divider full-width">
-                                    <span><i class="fa-solid fa-people-group"></i> Consortium Breakdown</span>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="conlum">Lumpsum Consortium (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-coins field-icon"></i>
-                                        <input type="number" id="conlum" name="conlum" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="conspo">Spouse Consortium (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-heart field-icon"></i>
-                                        <input type="number" id="conspo" name="conspo" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="conpar">Parental Consortium (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-person-shelter field-icon"></i>
-                                        <input type="number" id="conpar" name="conpar" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="conchil">Children Consortium (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-child field-icon"></i>
-                                        <input type="number" id="conchil" name="conchil" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="conwif">Wife Consortium (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-ring field-icon"></i>
-                                        <input type="number" id="conwif" name="conwif" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="conmo">Mother Consortium (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-person-breastfeeding field-icon"></i>
-                                        <input type="number" id="conmo" name="conmo" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="confath">Father Consortium (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-person field-icon"></i>
-                                        <input type="number" id="confath" name="confath" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="conhus">Husband Consortium (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-user-tie field-icon"></i>
-                                        <input type="number" id="conhus" name="conhus" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="conbro">Brother Consortium (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-user-group field-icon"></i>
-                                        <input type="number" id="conbro" name="conbro" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="consis">Sister Consortium (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-user-group field-icon"></i>
-                                        <input type="number" id="consis" name="consis" placeholder="0">
+                                        <i class="fa-solid fa-chart-line field-icon"></i>
+                                        <input type="number" id="future_prospect" name="future_prospect" placeholder="e.g. 25" min="0" max="100" required>
                                     </div>
                                 </div>
                             </div>
@@ -390,65 +270,6 @@
                                     </div>
                                 </div>
 
-                                <div class="section-divider full-width">
-                                    <span><i class="fa-solid fa-scale-balanced"></i> Extra Award Heads</span>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="coliti">Cost of Litigation (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-gavel field-icon"></i>
-                                        <input type="number" id="coliti" name="coliti" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="misex">Miscellaneous Expenditure (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-receipt field-icon"></i>
-                                        <input type="number" id="misex" name="misex" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="loamiti">Loss of Amenities in life (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-icons field-icon"></i>
-                                        <input type="number" id="loamiti" name="loamiti" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="lopmarri">Loss of Prospects of Marriage (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-ring field-icon"></i>
-                                        <input type="number" id="lopmarri" name="lopmarri" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="loexlife">Loss of Expectation of Life (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-hourglass-half field-icon"></i>
-                                        <input type="number" id="loexlife" name="loexlife" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="loveaff">Love and Affection (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-heart field-icon"></i>
-                                        <input type="number" id="loveaff" name="loveaff" placeholder="0">
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="lossofenjoy">Loss of Enjoyment of life (Rs.)</label>
-                                    <div class="input-icon-wrapper">
-                                        <i class="fa-solid fa-face-smile field-icon"></i>
-                                        <input type="number" id="lossofenjoy" name="lossofenjoy" placeholder="0">
-                                    </div>
-                                </div>
                             </div>
 
                             <!-- Buttons -->
@@ -476,94 +297,7 @@
                             </div>
                         </div>
 
-                        <!-- Floating Action Bar Toolbar -->
-                        <div class="preview-floating-toolbar" id="preview-toolbar">
-                            <button type="button" class="floating-tool-btn" data-panel="summary" title="AI Legal Briefing">
-                                <i class="fa-solid fa-brain-circuit text-purple"></i>
-                            </button>
-                            <button type="button" class="floating-tool-btn" data-panel="table" title="Extracted Table">
-                                <i class="fa-solid fa-table-list text-green"></i>
-                            </button>
-                            <button type="button" class="floating-tool-btn" data-panel="heuristics" title="Mathematical Heuristics">
-                                <i class="fa-solid fa-bolt text-warning"></i>
-                            </button>
-                            <button type="button" class="floating-tool-btn" data-panel="benchmarks" title="Qdrant Precedents Benchmark">
-                                <i class="fa-solid fa-scale-balanced text-glow"></i>
-                            </button>
-                        </div>
 
-                        <!-- Slide-Over Glassmorphic Drawer -->
-                        <div class="slideover-panel" id="right-slideover">
-                            <div class="slideover-header">
-                                <h3 id="slideover-title">AI Legal Briefing</h3>
-                                <button type="button" class="slideover-close-btn" id="close-slideover">
-                                    <i class="fa-solid fa-xmark"></i>
-                                </button>
-                            </div>
-                            <div class="slideover-body scroll-y">
-                                <!-- Legal AI Summary Briefing Card -->
-                                <div class="card summary-card slideover-tab-content" id="legal-ai-summary-card" style="padding: 16px; display: flex; flex-direction: column; border: none; background: transparent; box-shadow: none;">
-                                    <div class="card-body" id="legal-ai-summary-body" style="flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 0;">
-                                        <div class="empty-summary-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; opacity: 0.5; padding: 20px 0;">
-                                            <i class="fa-solid fa-gavel" style="font-size: 2.5rem; color: #c084fc;"></i>
-                                            <p style="font-size: 0.8rem; color: var(--text-secondary); text-align: center; margin: 0;">Upload a PDF to see the structured legal analysis summary and judicial anomaly checklist.</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Extracted Compensation Table Card -->
-                                <div class="card table-card slideover-tab-content tab-hidden" id="compensation-table-card" style="padding: 16px; display: flex; flex-direction: column; border: none; background: transparent; box-shadow: none;">
-                                    <div class="card-body" id="compensation-table-body" style="flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 0;">
-                                        <div class="empty-table-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; opacity: 0.5; padding: 20px 0;">
-                                            <i class="fa-solid fa-table-list" style="font-size: 2.5rem; color: #34d399;"></i>
-                                            <p style="font-size: 0.8rem; color: var(--text-secondary); text-align: center; margin: 0;">Upload a PDF to view the detailed breakdown of the judicial award heads.</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Real-time Mathematical Heuristics -->
-                                <div class="card metrics-card slideover-tab-content tab-hidden" id="live-metrics-card" style="border: none; background: transparent; box-shadow: none; padding: 16px;">
-                                    <div class="card-body metrics-grid" style="padding: 0;">
-                                        <div class="metric-item">
-                                            <span class="metric-label">Calculated Age</span>
-                                            <span class="metric-value" id="live-age">-</span>
-                                        </div>
-                                        <div class="metric-item">
-                                            <span class="metric-label">Sarla Verma Multiplier</span>
-                                            <span class="metric-value text-glow" id="live-multiplier">-</span>
-                                        </div>
-                                        <div class="metric-item full-width" id="live-prospects-item">
-                                            <span class="metric-label">Future Prospects</span>
-                                            <div class="prospects-progress-container">
-                                                <span class="metric-value" id="live-prospects">-</span>
-                                                <div class="progress-bar-wrapper">
-                                                    <div class="progress-bar-fill" id="live-prospects-bar"></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="metric-item full-width" id="live-deductions-item">
-                                            <span class="metric-label">Family Deduction</span>
-                                            <div class="prospects-progress-container">
-                                                <span class="metric-value" id="live-deductions">-</span>
-                                                <div class="progress-bar-wrapper">
-                                                    <div class="progress-bar-fill bg-danger" id="live-deductions-bar"></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Precedents Benchmarking evaluation -->
-                                <div class="card ocr-card slideover-tab-content tab-hidden" id="evaluator-card" style="border: none; background: transparent; box-shadow: none; padding: 16px;">
-                                    <div class="card-header" style="padding: 0 0 12px 0; border-bottom: 1px solid var(--border-glass); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-                                        <button type="button" id="trigger-eval-btn" class="btn btn-small btn-primary"><i class="fa-solid fa-wand-magic-sparkles"></i> Evaluate precedents</button>
-                                    </div>
-                                    <div class="card-body" id="evaluator-card-body" style="padding: 0;">
-                                        <p class="card-text" style="color: var(--text-secondary); font-size: 0.85rem;">Once your case parameters are complete, click **Evaluate Precedents** to run a centralized Qdrant semantic analysis against historical judgments.</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
 
                     </div>
                 </div>

@@ -167,8 +167,8 @@ document.addEventListener("DOMContentLoaded", () => {
         deathFields.classList.remove("show");
         injuryFields.classList.remove("show");
         formActionsBar.classList.remove("show-flex");
-        liveMetricsCard.classList.remove("show");
-        evaluatorCard.classList.remove("show");
+        if (liveMetricsCard) liveMetricsCard.classList.remove("show");
+        if (evaluatorCard) evaluatorCard.classList.remove("show");
         singleUploadSection.classList.remove("show");
         singleUploadSection.classList.remove("show-flex");
 
@@ -178,23 +178,29 @@ document.addEventListener("DOMContentLoaded", () => {
             
             if (caseType === "injury") {
                 injuryFields.classList.add("show");
-                liveDeductionsItem.classList.add("hidden");
-                liveProspectsItem.classList.add("hidden");
+                if (liveDeductionsItem) liveDeductionsItem.classList.add("hidden");
+                if (liveProspectsItem) liveProspectsItem.classList.add("hidden");
                 
-                document.getElementById("label-dependents").innerHTML = "Number of Dependents";
-                dependentsInput.removeAttribute("required");
+                const labelDeps = document.getElementById("label-dependents");
+                if (labelDeps) {
+                    labelDeps.innerHTML = "Number of Dependents";
+                }
+                if (dependentsInput) dependentsInput.removeAttribute("required");
             } else if (caseType === "death") {
                 deathFields.classList.add("show");
-                liveDeductionsItem.classList.remove("hidden");
-                liveProspectsItem.classList.remove("hidden");
+                if (liveDeductionsItem) liveDeductionsItem.classList.remove("hidden");
+                if (liveProspectsItem) liveProspectsItem.classList.remove("hidden");
                 
-                document.getElementById("label-dependents").innerHTML = "Number of Dependents <span class=\"req\">*</span>";
-                dependentsInput.setAttribute("required", "required");
+                const labelDeps = document.getElementById("label-dependents");
+                if (labelDeps) {
+                    labelDeps.innerHTML = "Number of Dependents <span class=\"req\">*</span>";
+                }
+                if (dependentsInput) dependentsInput.setAttribute("required", "required");
             }
             
             formActionsBar.classList.add("show-flex");
-            liveMetricsCard.classList.add("show");
-            evaluatorCard.classList.add("show");
+            if (liveMetricsCard) liveMetricsCard.classList.add("show");
+            if (evaluatorCard) evaluatorCard.classList.add("show");
             
             updateLiveCalculations();
         }, 150);
@@ -257,43 +263,18 @@ document.addEventListener("DOMContentLoaded", () => {
     function updateLiveCalculations() {
         const dobVal = dobInput.value;
         const doaVal = doaInput.value;
-        const caseType = caseTypeSelect.value;
         
         const age = calculateAge(dobVal, doaVal);
         
         if (age !== null) {
             ageInput.value = age;
-            liveAge.textContent = `${age} yrs`;
-            
-            const multiplier = getMultiplier(age);
-            liveMultiplier.textContent = multiplier;
-            
-            if (caseType === "death") {
-                const futureType = futureTypeSelect.value;
-                const prospectsPercent = getFutureProspectPercentage(age, futureType);
-                liveProspects.textContent = `${prospectsPercent}%`;
-                liveProspectsBar.style.width = `${prospectsPercent}%`;
-                
-                const dependentsCount = parseInt(dependentsInput.value) || 0;
-                const status = maritalStatusSelect.value;
-                const deductionPercent = getDeductionPercentage(dependentsCount, status);
-                liveDeductions.textContent = `${deductionPercent}%`;
-                liveDeductionsBar.style.width = `${deductionPercent}%`;
-            }
         } else {
             ageInput.value = "";
-            liveAge.textContent = "-";
-            liveMultiplier.textContent = "-";
-            liveProspects.textContent = "-";
-            liveProspectsBar.style.width = "0%";
-            liveDeductions.textContent = "-";
-            liveDeductionsBar.style.width = "0%";
         }
     }
 
     dobInput.addEventListener("change", updateLiveCalculations);
     doaInput.addEventListener("change", updateLiveCalculations);
-    futureTypeSelect.addEventListener("change", updateLiveCalculations);
     maritalStatusSelect.addEventListener("change", updateLiveCalculations);
     dependentsInput.addEventListener("input", updateLiveCalculations);
 
@@ -384,8 +365,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 singlePreviewCard.classList.add("show");
 
                 // Highlight and show the live metrics and precedents cards
-                liveMetricsCard.classList.add("show");
-                evaluatorCard.classList.add("show");
+                if (liveMetricsCard) liveMetricsCard.classList.add("show");
+                if (evaluatorCard) evaluatorCard.classList.add("show");
 
                 alert("Case PDF analyzed! Form auto-filled focusing on Previous Judgment, Petition, and Prayer details. Please manually review fields and click 'Calculate' to compute compensation.");
             } else {
@@ -400,27 +381,39 @@ document.addEventListener("DOMContentLoaded", () => {
             const caseType = caseTypeSelect.value;
             const mockSuggestions = caseType === "death" ? {
                 case_type: "death",
-                name: "Late Smt. Sunita Devi",
-                father_name: "Late Shri Vijay Pal",
-                date_of_birth: "08-08-1984",
-                date_of_accident: "22-09-2024",
-                age: 40,
-                monthly_income: 30000,
-                dependents: 4,
-                marital_status: "married",
-                place_of_accident: "National Highway NH-3, Bypass Crossing"
+                fields: {
+                    deceased_name: "Late Smt. Sunita Devi",
+                    father_name: "Late Shri Vijay Pal",
+                    date_of_birth: "08-08-1984",
+                    date_of_accident: "22-09-2024",
+                    age: 40,
+                    monthly_income: 30000,
+                    marital_status: "married",
+                    future_prospect: 25,
+                    place_of_accident: "National Highway NH-3, Bypass Crossing"
+                },
+                total_compensation: 615000
             } : {
                 case_type: "injury",
-                name: "Shri Rajesh Kumar Sharma",
-                father_name: "Shri Om Prakash Sharma",
-                date_of_birth: "12-04-1992",
-                date_of_accident: "15-10-2024",
-                age: 32,
-                monthly_income: 25000,
-                disability: 40,
-                dependents: 3,
-                marital_status: "married",
-                place_of_accident: "Bypass Road, near Jabalpur Crossing"
+                fields: {
+                    injured_name: "Shri Rajesh Kumar Sharma",
+                    father_name: "Shri Om Prakash Sharma",
+                    date_of_birth: "12-04-1992",
+                    date_of_accident: "15-10-2024",
+                    age: 32,
+                    monthly_income: 25000,
+                    disability: 40,
+                    dependents: 3,
+                    medical_expenses: 15000,
+                    pain_and_suffering: 10000,
+                    transportation: 5000,
+                    special_diet: 3000,
+                    attender_charges: 4000,
+                    future_medical_expenses: 12000,
+                    loss_of_income: 8000,
+                    place_of_accident: "Bypass Road, near Jabalpur Crossing"
+                },
+                total_compensation: 250000
             };
 
             applyAllOcrSuggestions(mockSuggestions);
@@ -680,105 +673,27 @@ document.addEventListener("DOMContentLoaded", () => {
         document.querySelectorAll(".low-confidence-input").forEach(el => el.classList.remove("low-confidence-input"));
         document.querySelectorAll(".ai-metadata-badge").forEach(el => el.remove());
 
-        // Extract case type robustly supporting both flat and nested schemas
-        let caseType = suggestions.case_type;
-        if (caseType && typeof caseType === "object" && caseType.value !== undefined) {
-            caseType = caseType.value;
-        }
-
+        // Extract case type
+        const caseType = suggestions.case_type;
         if (caseType) {
             caseTypeSelect.value = caseType;
             caseTypeSelect.dispatchEvent(new Event("change"));
         }
 
-        // Helper to extract value and details from suggestions (nested or flat format)
-        function getValAndDetails(key) {
-            let item = suggestions[key];
-            
-            // Map keys dynamically to match incoming nested JSON structure
-            if (item === undefined) {
-                if (key === "name") {
-                    item = suggestions["deceased_name"] || suggestions["injured_name"];
-                } else if (key === "consortium") {
-                    item = suggestions["loss_of_consortium"];
-                } else if (key === "loss_estate") {
-                    item = suggestions["loss_of_estate"];
-                } else if (key === "disability") {
-                    item = suggestions["permanent_disability"];
-                }
-            }
+        const fields = suggestions.fields || {};
 
-            if (item === undefined || item === null) return null;
-
-            if (typeof item === "object" && item.value !== undefined) {
-                return item; // returns complete nested { value, confidence, source_page, source_section, extraction_method }
-            }
-            
-            // Return simulated nested structure for backward-compatible flat input
-            let confObj = null;
-            if (suggestions.confidence_scores) {
-                confObj = suggestions.confidence_scores[key];
-            }
-            return {
-                value: item,
-                confidence: confObj ? confObj.confidence : 0.9,
-                source_page: confObj ? confObj.source_page : 1,
-                source_section: confObj ? confObj.source_section : "raw_ocr",
-                extraction_method: confObj ? confObj.extraction_method : "Heuristic Regex"
-            };
-        }
-
-        const standardKeys = [
-            "name", "father_name", "dependents", "marital_status", "monthly_income", "disability", "place_of_accident",
-            "consortium", "funeral_expenses", "loss_estate",
-            "conlum", "conspo", "conpar", "conchil", "conwif", "conmo", "confath", "conhus", "conbro", "consis",
-            "coliti", "misex", "loamiti", "lopmarri", "loexlife", "loveaff", "lossofenjoy",
-            "medical_expenses", "future_medical_expenses", "pain_and_suffering", "transportation", "special_diet", "attender_charges", "loss_of_income"
-        ];
-
-        standardKeys.forEach(key => {
-            const dataObj = getValAndDetails(key);
-            if (dataObj && dataObj.value !== undefined && dataObj.value !== null && dataObj.value !== "") {
-                const el = document.getElementById(key);
-                if (el) {
-                    el.value = dataObj.value;
-                    el.dispatchEvent(new Event("input"));
-                    el.dispatchEvent(new Event("change"));
-                }
-            }
-        });
-
-        // Convert and apply dates
-        ["date_of_birth", "date_of_accident"].forEach(key => {
-            const dataObj = getValAndDetails(key);
-            if (dataObj && dataObj.value) {
-                const val = dataObj.value;
-                if (val.includes("-")) {
-                    const parts = val.split("-");
-                    if (parts.length === 3 && parts[2].length === 4) {
-                        const htmlDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
-                        const targetEl = key === "date_of_birth" ? dobInput : doaInput;
-                        targetEl.value = htmlDate;
-                        targetEl.dispatchEvent(new Event("change"));
-                    }
-                }
-            }
-        });
-        
-        // Render premium glassmorphic confidence badges directly from mapped keys!
+        // Helper to map incoming clean fields to the corresponding DOM element IDs
         const fieldMapping = {
-            "name": "name",
+            "deceased_name": "name",
+            "injured_name": "name",
             "father_name": "father_name",
-            "date_of_birth": "date_of_birth",
-            "date_of_accident": "date_of_accident",
             "place_of_accident": "place_of_accident",
+            "age": "age",
             "monthly_income": "monthly_income",
             "dependents": "dependents",
             "marital_status": "marital_status",
+            "future_prospect": "future_prospect",
             "disability": "disability",
-            "consortium": "consortium",
-            "funeral_expenses": "funeral_expenses",
-            "loss_estate": "loss_estate",
             "medical_expenses": "medical_expenses",
             "future_medical_expenses": "future_medical_expenses",
             "pain_and_suffering": "pain_and_suffering",
@@ -788,253 +703,35 @@ document.addEventListener("DOMContentLoaded", () => {
             "loss_of_income": "loss_of_income"
         };
 
-        const processedInputIds = new Set();
+        // Populate form inputs
+        Object.keys(fieldMapping).forEach(apiKey => {
+            const domId = fieldMapping[apiKey];
+            const val = fields[apiKey];
+            if (val !== undefined && val !== null && val !== "") {
+                const el = document.getElementById(domId);
+                if (el) {
+                    el.value = val;
+                    el.dispatchEvent(new Event("input"));
+                    el.dispatchEvent(new Event("change"));
+                }
+            }
+        });
 
-        function cleanSectionName(secName) {
-            if (!secName) return "N/A";
-            return secName
-                .replace(/_/g, ' ')
-                .replace(/-/g, ' ')
-                .replace(/\b\w/g, c => c.toUpperCase());
-        }
-
-        Object.keys(fieldMapping).forEach(key => {
-            const dataObj = getValAndDetails(key);
-            if (dataObj && dataObj.value !== undefined && dataObj.value !== null && dataObj.value !== "") {
-                const domId = fieldMapping[key];
-                if (domId && !processedInputIds.has(domId)) {
-                    const inputEl = document.getElementById(domId);
-                    if (inputEl) {
-                        processedInputIds.add(domId);
-                        const formGroup = inputEl.closest(".form-group");
-                        if (formGroup) {
-                            let confidence = dataObj.confidence;
-                            if (confidence <= 1.0 && confidence > 0) {
-                                confidence = Math.round(confidence * 100);
-                            }
-                            
-                            // Create premium interactive badge and glassmorphic tooltip
-                            const badge = document.createElement("div");
-                            badge.className = "ai-metadata-badge";
-                            
-                            const isLow = confidence < 70;
-                            const badgeColor = isLow ? "var(--color-warning)" : "var(--color-success)";
-                            const iconClass = isLow ? "fa-solid fa-triangle-exclamation" : "fa-solid fa-circle-check";
-                            
-                            badge.innerHTML = `
-                                <i class="${iconClass}" style="color: ${badgeColor}"></i>
-                                <span class="ai-metadata-pct" style="color: ${badgeColor}">${confidence}%</span>
-                                <div class="ai-metadata-tooltip">
-                                    <div class="tooltip-header">
-                                        <i class="fa-solid fa-sparkles text-glow"></i> AI Extraction Metrics
-                                    </div>
-                                    <div class="tooltip-row">
-                                        <span class="t-label">Confidence:</span>
-                                        <span class="t-value" style="color: ${badgeColor}">${confidence}%</span>
-                                    </div>
-                                    <div class="tooltip-row">
-                                        <span class="t-label">Source Section:</span>
-                                        <span class="t-value text-glow-purple">${cleanSectionName(dataObj.source_section || dataObj.source || 'N/A')}</span>
-                                    </div>
-                                    <div class="tooltip-row">
-                                        <span class="t-label">Source Page:</span>
-                                        <span class="t-value">Page ${dataObj.source_page || 1}</span>
-                                    </div>
-                                    <div class="tooltip-row">
-                                        <span class="t-label">Extraction Method:</span>
-                                        <span class="t-value" style="color: var(--color-primary); font-size: 0.72rem;">${dataObj.extraction_method || 'N/A'}</span>
-                                    </div>
-                                </div>
-                            `;
-                            
-                            const label = formGroup.querySelector("label");
-                            if (label) {
-                                label.style.display = "flex";
-                                label.style.alignItems = "center";
-                                label.style.justifyContent = "space-between";
-                                label.style.width = "100%";
-                                label.appendChild(badge);
-                            }
-
-                            // Flag low confidence with legacy verification warning label
-                            if (isLow && confidence > 0) {
-                                const wrapper = inputEl.closest(".input-icon-wrapper") || inputEl.closest(".select-wrapper") || inputEl;
-                                wrapper.classList.add("low-confidence-input");
-                                
-                                const warningMsg = document.createElement("div");
-                                warningMsg.className = "verification-warning";
-                                warningMsg.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Low confidence (${confidence}%). Verify manually.`;
-                                formGroup.appendChild(warningMsg);
-                                
-                                const clearWarning = () => {
-                                    wrapper.classList.remove("low-confidence-input");
-                                    warningMsg.remove();
-                                    inputEl.removeEventListener("input", clearWarning);
-                                    inputEl.removeEventListener("change", clearWarning);
-                                };
-                                inputEl.addEventListener("input", clearWarning);
-                                inputEl.addEventListener("change", clearWarning);
-                            }
-                        }
+        // Convert and apply dates
+        ["date_of_birth", "date_of_accident"].forEach(key => {
+            const val = fields[key];
+            if (val && val.includes("-")) {
+                const parts = val.split("-");
+                if (parts.length === 3 && parts[2].length === 4) {
+                    const htmlDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
+                    const targetEl = key === "date_of_birth" ? dobInput : doaInput;
+                    if (targetEl) {
+                        targetEl.value = htmlDate;
+                        targetEl.dispatchEvent(new Event("change"));
                     }
                 }
             }
         });
-        
-        // Update Legal AI Summary Card (safe checking in case summary metadata is omitted)
-        const summaryCard = document.getElementById("legal-ai-summary-card");
-        const summaryBody = document.getElementById("legal-ai-summary-body");
-        
-        if (summaryCard && summaryBody && suggestions.legal_ai_summary) {
-            let htmlContent = '';
-            const text = suggestions.legal_ai_summary;
-            const anomalies = suggestions.anomalies_detected || [];
-            
-            let factsText = '';
-            let paramsText = '';
-            let appealText = '';
-            
-            const sentences = text.split('. ').map(s => s.trim()).filter(s => s.length > 0);
-            sentences.forEach(sentence => {
-                const s = sentence.toLowerCase();
-                if (s.includes("appeal challenges") || s.includes("profile involves") || s.includes("accident") || s.includes("individual, historically")) {
-                    factsText += sentence + '. ';
-                } else if (s.includes("income") || s.includes("multiplier") || s.includes("prospects") || s.includes("awarded stands") || s.includes("compensation awarded stands")) {
-                    paramsText += sentence + '. ';
-                } else if (s.includes("requests a") || s.includes("requests an") || s.includes("appeal requests") || s.includes("requests a reduction") || s.includes("requests an enhancement")) {
-                    appealText += sentence + '. ';
-                } else {
-                    factsText += sentence + '. ';
-                }
-            });
-            
-            if (!factsText) factsText = text;
-            
-            htmlContent += `
-                <div class="legal-summary-section">
-                    <div class="legal-summary-title facts">
-                        <i class="fa-solid fa-circle-info"></i> Case Facts Briefing
-                    </div>
-                    <div class="legal-summary-text">${factsText}</div>
-                </div>
-            `;
-            
-            if (paramsText) {
-                htmlContent += `
-                    <div class="legal-summary-section" style="margin-top: 10px;">
-                        <div class="legal-summary-title metrics">
-                            <i class="fa-solid fa-calculator"></i> Judicial Parameter Breakdown
-                        </div>
-                        <div class="legal-summary-text">${paramsText}</div>
-                    </div>
-                `;
-            }
-            
-            if (appealText) {
-                htmlContent += `
-                    <div class="legal-summary-section" style="margin-top: 10px;">
-                        <div class="legal-summary-title direction">
-                            <i class="fa-solid fa-angles-up"></i> Appeal Direction
-                        </div>
-                        <div class="legal-summary-text">${appealText}</div>
-                    </div>
-                `;
-            }
-            
-            if (anomalies.length > 0) {
-                htmlContent += `
-                    <div class="legal-summary-section" style="margin-top: 10px;">
-                        <div class="legal-summary-title anomalies">
-                            <i class="fa-solid fa-triangle-exclamation"></i> Legal AI Verification Checklist
-                        </div>
-                        <div class="legal-summary-anomalies-list" style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
-                `;
-                
-                anomalies.forEach(anomaly => {
-                    const isWarning = anomaly.toLowerCase().includes("mismatch") || anomaly.toLowerCase().includes("invalid") || anomaly.toLowerCase().includes("dob") || anomaly.toLowerCase().includes("fail") || anomaly.toLowerCase().includes("differ") || anomaly.toLowerCase().includes("after");
-                    const iconClass = isWarning ? "fa-triangle-exclamation text-warning" : "fa-circle-check text-success";
-                    const itemStyle = isWarning ? "background: rgba(245, 158, 11, 0.08); border: 1px dashed rgba(245, 158, 11, 0.2); color: #f59e0b;" : "background: rgba(16, 185, 129, 0.08); border: 1px dashed rgba(16, 185, 129, 0.2); color: #10b981;";
-                    
-                    htmlContent += `
-                        <div class="legal-summary-anomaly-item" style="${itemStyle}">
-                            <i class="fa-solid ${iconClass}"></i>
-                            <span>${anomaly}</span>
-                        </div>
-                    `;
-                });
-                
-                htmlContent += `
-                        </div>
-                    </div>
-                `;
-            } else {
-                htmlContent += `
-                    <div class="legal-summary-section" style="margin-top: 10px;">
-                        <div class="legal-summary-title anomalies" style="color: var(--color-success)">
-                            <i class="fa-solid fa-circle-check"></i> Legal AI Verification Checklist
-                        </div>
-                        <div class="legal-summary-anomaly-item" style="background: rgba(16, 185, 129, 0.08); border: 1px dashed rgba(16, 185, 129, 0.2); color: #10b981; margin-top: 4px; display: flex; align-items: center; gap: 8px;">
-                            <i class="fa-solid fa-circle-check text-success"></i>
-                            <span>All judicial parameters fully aligned with legal benchmarks (Sarla Verma & Pranay Sethi standards verified).</span>
-                        </div>
-                    </div>
-                `;
-            }
-            
-            summaryBody.innerHTML = htmlContent;
-            summaryCard.classList.remove("hidden-section");
-            summaryCard.classList.add("show");
-        } else if (summaryCard) {
-            summaryCard.classList.add("hidden-section");
-            summaryCard.classList.remove("show");
-        }
-        
-        // Update Compensation Table Card (safe checking)
-        const tableCard = document.getElementById("compensation-table-card");
-        const tableBody = document.getElementById("compensation-table-body");
-        
-        if (tableCard && tableBody) {
-            const tableData = suggestions.compensation_table;
-            if (tableData && Object.keys(tableData).length > 0) {
-                let html = '<div class="extracted-table-container">';
-                let total = 0.0;
-                
-                Object.keys(tableData).forEach(head => {
-                    const amt = tableData[head];
-                    total += amt;
-                    html += `
-                        <div class="extracted-table-row">
-                            <span class="extracted-table-head">${head}</span>
-                            <span class="extracted-table-amount">Rs. ${amt.toLocaleString('en-IN')}</span>
-                        </div>
-                    `;
-                });
-                
-                // Add Reconstructed Total Row
-                html += `
-                    <div class="extracted-table-row total-row">
-                        <span class="extracted-table-head">Reconstructed Award Total</span>
-                        <span class="extracted-table-amount">Rs. ${total.toLocaleString('en-IN')}</span>
-                    </div>
-                `;
-                html += '</div>';
-                
-                tableBody.innerHTML = html;
-                tableCard.classList.remove("hidden-section");
-                tableCard.classList.add("show");
-            } else {
-                tableCard.classList.add("hidden-section");
-                tableCard.classList.remove("show");
-            }
-        }
-        
-        // Judicial System Badge Display
-        if (suggestions.is_tamil_nadu) {
-            const badgeId = "tn-mact-badge";
-            if (!document.getElementById(badgeId) && singlePreviewFilename) {
-                singlePreviewFilename.innerHTML += ` <span id="${badgeId}" class="badge source-badge" style="margin-left: 8px; background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; display: inline-block;">Judicial System (${suggestions.mcop_number || 'MCOP'})</span>`;
-            }
-        }
         
         alert(`Auto-filled workstation variables successfully! DOB and accident dates converted.`);
     }
@@ -1114,54 +811,56 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==========================================================================
     // COMPARATIVE LEGAL EVALUATOR (TAB 1)
     // ==========================================================================
-    triggerEvalBtn.addEventListener("click", async () => {
-        if (!currentCalculationAmount || currentCalculationAmount <= 0) {
-            alert("Please calculate the compensation first by filling in mandatory workstation variables and clicking 'Calculate'.");
-            return;
-        }
+    if (triggerEvalBtn) {
+        triggerEvalBtn.addEventListener("click", async () => {
+            if (!currentCalculationAmount || currentCalculationAmount <= 0) {
+                alert("Please calculate the compensation first by filling in mandatory workstation variables and clicking 'Calculate'.");
+                return;
+            }
 
-        // Display loading loader inside evaluator card body
-        evaluatorCardBody.innerHTML = `
-            <div class="empty-state" style="padding: 10px 0;">
-                <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--color-primary);"></i>
-                <p>Generating query embeddings & fetching precedents from Qdrant vector database...</p>
-            </div>
-        `;
+            // Display loading loader inside evaluator card body
+            evaluatorCardBody.innerHTML = `
+                <div class="empty-state" style="padding: 10px 0;">
+                    <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--color-primary);"></i>
+                    <p>Generating query embeddings & fetching precedents from Qdrant vector database...</p>
+                </div>
+            `;
 
-        const caseType = caseTypeSelect.value;
-        const payload = {
-            params: {
-                case_type: caseType,
-                age: parseInt(ageInput.value) || 0,
-                monthly_income: parseFloat(monthlyIncomeInput.value) || 0,
-                dependents: parseInt(dependentsInput.value) || 0,
-                marital_status: maritalStatusSelect.value || "married",
-                disability: parseFloat(document.getElementById("disability").value) || 0,
-                name: document.getElementById("name").value || "Claimant"
-            },
-            calculated_amount: currentCalculationAmount
-        };
+            const caseType = caseTypeSelect.value;
+            const payload = {
+                params: {
+                    case_type: caseType,
+                    age: parseInt(ageInput.value) || 0,
+                    monthly_income: parseFloat(monthlyIncomeInput.value) || 0,
+                    dependents: parseInt(dependentsInput.value) || 0,
+                    marital_status: maritalStatusSelect.value || "married",
+                    disability: parseFloat(document.getElementById("disability").value) || 0,
+                    name: document.getElementById("name").value || "Claimant"
+                },
+                calculated_amount: currentCalculationAmount
+            };
 
-        try {
-            const response = await fetch("/api/search/evaluate", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-            });
+            try {
+                const response = await fetch("/api/search/evaluate", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
 
-            if (!response.ok) throw new Error("Evaluation failed");
-            const data = await response.json();
-            
-            renderPrecedentEvaluation(data.evaluation);
+                if (!response.ok) throw new Error("Evaluation failed");
+                const data = await response.json();
+                
+                renderPrecedentEvaluation(data.evaluation);
 
-        } catch (error) {
-            console.error("Benchmarking evaluation failed:", error);
-            alert("Failed to benchmark precedents on server. Running simulated evaluation analysis.");
-            // Offline fallback evaluator
-            const fallbackEvaluation = simulateEvaluationMath(payload);
-            renderPrecedentEvaluation(fallbackEvaluation);
-        }
-    });
+            } catch (error) {
+                console.error("Benchmarking evaluation failed:", error);
+                alert("Failed to benchmark precedents on server. Running simulated evaluation analysis.");
+                // Offline fallback evaluator
+                const fallbackEvaluation = simulateEvaluationMath(payload);
+                renderPrecedentEvaluation(fallbackEvaluation);
+            }
+        });
+    }
 
     function simulateEvaluationMath(req) {
         const cal = req.calculated_amount;
@@ -1250,6 +949,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==========================================================================
     // FORM CALCULATOR API SUBMISSION
     // ==========================================================================
+    // ==========================================================================
+    // FORM CALCULATOR API SUBMISSION
+    // ==========================================================================
     compensationForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         
@@ -1266,40 +968,40 @@ document.addEventListener("DOMContentLoaded", () => {
             
             dependents: parseInt(dependentsInput.value) || 0,
             marital_status: maritalStatusSelect.value || "married",
-            future_type: parseInt(futureTypeSelect.value) || 2,
-            consortium: parseFloat(document.getElementById("consortium").value) || 40000,
-            funeral_expenses: parseFloat(document.getElementById("funeral_expenses").value) || 15000,
-            loss_estate: parseFloat(document.getElementById("loss_estate").value) || 15000,
+            future_type: parseInt(futureTypeSelect?.value) || 2,
+            consortium: 40000,
+            funeral_expenses: 15000,
+            loss_estate: 15000,
 
-            // Consortium breakdown
-            conlum: parseFloat(document.getElementById("conlum").value) || 0,
-            conspo: parseFloat(document.getElementById("conspo").value) || 0,
-            conpar: parseFloat(document.getElementById("conpar").value) || 0,
-            conchil: parseFloat(document.getElementById("conchil").value) || 0,
-            conwif: parseFloat(document.getElementById("conwif").value) || 0,
-            conmo: parseFloat(document.getElementById("conmo").value) || 0,
-            confath: parseFloat(document.getElementById("confath").value) || 0,
-            conhus: parseFloat(document.getElementById("conhus").value) || 0,
-            conbro: parseFloat(document.getElementById("conbro").value) || 0,
-            consis: parseFloat(document.getElementById("consis").value) || 0,
+            // Consortium breakdown (hardcoded to 0 under the hood)
+            conlum: 0,
+            conspo: 0,
+            conpar: 0,
+            conchil: 0,
+            conwif: 0,
+            conmo: 0,
+            confath: 0,
+            conhus: 0,
+            conbro: 0,
+            consis: 0,
             
-            disability: parseFloat(document.getElementById("disability").value) || 0,
-            medical_expenses: parseFloat(document.getElementById("medical_expenses").value) || 0,
-            future_medical_expenses: parseFloat(document.getElementById("future_medical_expenses").value) || 0,
-            pain_and_suffering: parseFloat(document.getElementById("pain_and_suffering").value) || 0,
-            transportation: parseFloat(document.getElementById("transportation").value) || 0,
-            special_diet: parseFloat(document.getElementById("special_diet").value) || 0,
-            attender_charges: parseFloat(document.getElementById("attender_charges").value) || 0,
-            loss_of_income: parseFloat(document.getElementById("loss_of_income").value) || 0,
+            disability: parseFloat(document.getElementById("disability")?.value) || 0,
+            medical_expenses: parseFloat(document.getElementById("medical_expenses")?.value) || 0,
+            future_medical_expenses: parseFloat(document.getElementById("future_medical_expenses")?.value) || 0,
+            pain_and_suffering: parseFloat(document.getElementById("pain_and_suffering")?.value) || 0,
+            transportation: parseFloat(document.getElementById("transportation")?.value) || 0,
+            special_diet: parseFloat(document.getElementById("special_diet")?.value) || 0,
+            attender_charges: parseFloat(document.getElementById("attender_charges")?.value) || 0,
+            loss_of_income: parseFloat(document.getElementById("loss_of_income")?.value) || 0,
 
             // Extra Injury heads
-            coliti: parseFloat(document.getElementById("coliti").value) || 0,
-            misex: parseFloat(document.getElementById("misex").value) || 0,
-            loamiti: parseFloat(document.getElementById("loamiti").value) || 0,
-            lopmarri: parseFloat(document.getElementById("lopmarri").value) || 0,
-            loexlife: parseFloat(document.getElementById("loexlife").value) || 0,
-            loveaff: parseFloat(document.getElementById("loveaff").value) || 0,
-            lossofenjoy: parseFloat(document.getElementById("lossofenjoy").value) || 0
+            coliti: 0,
+            misex: 0,
+            loamiti: 0,
+            lopmarri: 0,
+            loexlife: 0,
+            loveaff: 0,
+            lossofenjoy: 0
         };
 
         try {
@@ -1317,7 +1019,7 @@ document.addEventListener("DOMContentLoaded", () => {
             openModal();
 
             // Enable Evaluator button
-            triggerEvalBtn.disabled = false;
+            if (triggerEvalBtn) triggerEvalBtn.disabled = false;
 
         } catch (error) {
             console.error("Calculation failed:", error);
@@ -1327,7 +1029,7 @@ document.addEventListener("DOMContentLoaded", () => {
             currentCalculationAmount = localResults.final_amount;
             renderResultsDashboard(localResults, payload);
             openModal();
-            triggerEvalBtn.disabled = false;
+            if (triggerEvalBtn) triggerEvalBtn.disabled = false;
         }
     });
 
@@ -1417,125 +1119,90 @@ document.addEventListener("DOMContentLoaded", () => {
         const fatherNameVal = document.getElementById("father_name").value || "N/A";
         const dateAccidentVal = doaInput.value ? new Date(doaInput.value).toLocaleDateString('en-IN') : "N/A";
         const dateBirthVal = dobInput.value ? new Date(dobInput.value).toLocaleDateString('en-IN') : "N/A";
+        const placeAccidentVal = document.getElementById("place_of_accident")?.value || "N/A";
         const caseTypeLabel = res.case_type === "death" ? "Death Claim" : "Injury Claim";
 
-        let specificsHtml = "";
-        let mathFormulaHtml = "";
-
+        let parametersHtml = "";
         if (res.case_type === "death") {
-            specificsHtml = `
-                <div class="detail-tile">
-                    <span class="tile-label">Sarla Verma Multiplier</span>
-                    <span class="tile-value text-glow">${res.multiplier}</span>
-                    <span class="tile-desc">Deceased's Age: ${req.age} yrs</span>
+            parametersHtml = `
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Monthly Income</span>
+                    <strong>${formatCurrency(req.monthly_income)}</strong>
                 </div>
-                <div class="detail-tile">
-                    <span class="tile-label">Future Prospects</span>
-                    <span class="tile-value">+${res.future_percentage}%</span>
-                    <span class="tile-desc">Enhanced Monthly: ${formatCurrency(res.enhanced_monthly_income)}</span>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Sarla Verma Multiplier</span>
+                    <strong>${res.multiplier}</strong>
                 </div>
-                <div class="detail-tile">
-                    <span class="tile-label">Family Deduction</span>
-                    <span class="tile-value text-glow-purple">${res.deduction_percentage}%</span>
-                    <span class="tile-desc">Dependents count: ${req.dependents}</span>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Future Prospects</span>
+                    <strong>+${res.future_percentage}%</strong>
                 </div>
-                <div class="detail-tile">
-                    <span class="tile-label">Annual Family Contribution</span>
-                    <span class="tile-value text-success">${formatCurrency(res.family_contribution)}</span>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Family Deduction</span>
+                    <strong>${res.deduction_percentage}%</strong>
                 </div>
-                <div class="detail-tile">
-                    <span class="tile-label">Loss of Dependency</span>
-                    <span class="tile-value text-glow">${formatCurrency(res.loss_dependency)}</span>
-                    <span class="tile-desc">Contribution &times; Multiplier (${res.multiplier})</span>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Number of Dependents</span>
+                    <strong>${req.dependents}</strong>
                 </div>
-                <div class="detail-tile">
-                    <span class="tile-label">Conventional Awards</span>
-                    <span class="tile-value">${formatCurrency(res.consortium + res.funeral_expenses + res.loss_estate + (res.conlum || 0) + (res.conspo || 0) + (res.conpar || 0) + (res.conchil || 0) + (res.conwif || 0) + (res.conmo || 0) + (res.confath || 0) + (res.conhus || 0) + (res.conbro || 0) + (res.consis || 0))}</span>
-                    <span class="tile-desc">Consortium, Funeral, Estate, and Consortium Breakdown subheads</span>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Standard Consortium (Fixed)</span>
+                    <strong>${formatCurrency(40000)}</strong>
                 </div>
-            `;
-
-            const sumConsortium = (res.conlum || 0) + (res.conspo || 0) + (res.conpar || 0) + (res.conchil || 0) + (res.conwif || 0) + (res.conmo || 0) + (res.confath || 0) + (res.conhus || 0) + (res.conbro || 0) + (res.consis || 0);
-
-            mathFormulaHtml = `
-                <div class="formula-title"><i class="fa-solid fa-square-root-variable"></i> Death Compensation Equation</div>
-                <div class="formula-content">
-                    Total Compensation = (Loss of Dependency) + (Consortium) + (Funeral Expenses) + (Loss of Estate) + (Consortium Breakdowns)<br>
-                    = (Enhanced Annual Income &times; [1 - Deduction %] &times; Multiplier) + Consortium + Funeral + Estate + Breakdowns<br>
-                    = (${formatCurrency(res.annual_income)} &times; ${1 - res.deduction_percentage/100} &times; ${res.multiplier}) + ${formatCurrency(res.consortium)} + ${formatCurrency(res.funeral_expenses)} + ${formatCurrency(res.loss_estate)} + ${formatCurrency(sumConsortium)}<br>
-                    = ${formatCurrency(res.loss_dependency)} + ${formatCurrency(res.consortium + res.funeral_expenses + res.loss_estate + sumConsortium)}<br>
-                    = <strong>${formatCurrency(res.final_amount)}</strong>
-                    <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 8px; font-weight: 500;">
-                        * Note: Conventional expenses enhanced @10% in every three years (base year 2017). Interest @6% applies from the date of the Petition till the date of payment.
-                    </div>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0;">
+                    <span>Funeral Expenses & Estate Loss (Fixed)</span>
+                    <strong>${formatCurrency(30000)}</strong>
                 </div>
             `;
         } else {
-            specificsHtml = `
-                <div class="detail-tile">
-                    <span class="tile-label">Sarla Verma Multiplier</span>
-                    <span class="tile-value text-glow">${res.multiplier}</span>
-                    <span class="tile-desc">Injured's Age: ${req.age} yrs</span>
+            parametersHtml = `
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Monthly Income</span>
+                    <strong>${formatCurrency(req.monthly_income)}</strong>
                 </div>
-                <div class="detail-tile">
-                    <span class="tile-label">Permanent Impairment</span>
-                    <span class="tile-value text-glow-purple">${req.disability}%</span>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Sarla Verma Multiplier</span>
+                    <strong>${res.multiplier}</strong>
                 </div>
-                <div class="detail-tile">
-                    <span class="tile-label">Future Loss of Income</span>
-                    <span class="tile-value text-success">${formatCurrency(res.future_income_loss)}</span>
-                    <span class="tile-desc">Annual Income &times; ${req.disability}% &times; Multiplier (${res.multiplier})</span>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Permanent Impairment</span>
+                    <strong>${req.disability}%</strong>
                 </div>
-                <div class="detail-tile">
-                    <span class="tile-label">Clinical & Medical Expenses</span>
-                    <span class="tile-value">${formatCurrency(res.medical_expenses + res.future_medical_expenses)}</span>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Medical Expenses</span>
+                    <strong>${formatCurrency(res.medical_expenses + res.future_medical_expenses)}</strong>
                 </div>
-                <div class="detail-tile">
-                    <span class="tile-label">Pain & Suffering Award</span>
-                    <span class="tile-value">${formatCurrency(res.pain_and_suffering)}</span>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Pain & Suffering</span>
+                    <strong>${formatCurrency(res.pain_and_suffering)}</strong>
                 </div>
-                <div class="detail-tile">
-                    <span class="tile-label">Supportive & Extra Allowances</span>
-                    <span class="tile-value">${formatCurrency(res.transportation + res.special_diet + res.attender_charges + res.loss_of_income + (res.coliti || 0) + (res.misex || 0) + (res.loamiti || 0) + (res.lopmarri || 0) + (res.loexlife || 0) + (res.loveaff || 0) + (res.lossofenjoy || 0))}</span>
-                    <span class="tile-desc">Diet, Attender, Transport, Litigation, Amenities, Marriage Loss, etc.</span>
-                </div>
-            `;
-
-            const sumExtraInjury = (res.coliti || 0) + (res.misex || 0) + (res.loamiti || 0) + (res.lopmarri || 0) + (res.loexlife || 0) + (res.loveaff || 0) + (res.lossofenjoy || 0);
-
-            mathFormulaHtml = `
-                <div class="formula-title"><i class="fa-solid fa-square-root-variable"></i> Injury Compensation Equation</div>
-                <div class="formula-content">
-                    Total Compensation = (Future Income Loss) + Medical Expenses + Future Medicals + Pain/Suffering + Transport + Special Diet + Attender + Loss during Treatment + Extra Award Heads<br>
-                    = (${formatCurrency(res.annual_income)} &times; ${req.disability}% &times; ${res.multiplier}) + ${formatCurrency(res.medical_expenses)} + ${formatCurrency(res.future_medical_expenses)} + ${formatCurrency(res.pain_and_suffering)} + ${formatCurrency(res.transportation + res.special_diet + res.attender_charges + res.loss_of_income + sumExtraInjury)}<br>
-                    = ${formatCurrency(res.future_income_loss)} + ${formatCurrency(res.medical_expenses + res.future_medical_expenses + res.pain_and_suffering + res.transportation + res.special_diet + res.attender_charges + res.loss_of_income + sumExtraInjury)}<br>
-                    = <strong>${formatCurrency(res.final_amount)}</strong>
-                    <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 8px; font-weight: 500;">
-                        * Note: Expenses enhanced @10% in every three years (base year 2017). Interest @6% applies from the date of the Petition till the date of payment.
-                    </div>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0;">
+                    <span>Other Allowances (Diet, Attender, Transport, Income Loss)</span>
+                    <strong>${formatCurrency(res.transportation + res.special_diet + res.attender_charges + res.loss_of_income)}</strong>
                 </div>
             `;
         }
 
         modalBodyContent.innerHTML = `
-            <div class="results-dashboard">
-                <div class="award-hero">
-                    <span class="hero-label">Estimated Award Valuation</span>
-                    <span class="hero-amount">${formatCurrency(res.final_amount)}</span>
-                    <span class="hero-tag"><i class="fa-solid fa-gavel"></i> ${caseTypeLabel}</span>
+            <div class="results-dashboard simplified-dashboard">
+                <div class="award-hero" style="text-align: center; margin-bottom: 20px;">
+                    <span class="hero-label" style="display: block; font-size: 0.85rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px;">Estimated Award Valuation</span>
+                    <span class="hero-amount" style="display: block; font-size: 2.5rem; font-weight: 800; font-family: 'Outfit', sans-serif; color: var(--color-success); margin: 6px 0; text-shadow: 0 0 20px rgba(52, 211, 153, 0.2);">${formatCurrency(res.final_amount)}</span>
+                    <span class="hero-tag" style="background: rgba(186, 104, 200, 0.2); color: #e9d5ff; border: 1px solid rgba(186, 104, 200, 0.3); font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; display: inline-flex; align-items: center; gap: 6px;"><i class="fa-solid fa-gavel"></i> ${caseTypeLabel}</span>
                 </div>
 
-                <div class="briefing-container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.82rem; border: 1px solid var(--border-glass); padding: 12px 16px; border-radius: var(--radius-sm); background: rgba(255,255,255,0.01)">
-                    <div><strong>Claimant Name:</strong> ${claimantName}</div>
+                <div class="briefing-container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.85rem; border: 1px solid var(--border-glass); padding: 16px; border-radius: var(--radius-sm); background: rgba(255,255,255,0.01); margin-bottom: 20px; color: var(--text-primary);">
+                    <div><strong>Claimant / Deceased Name:</strong> ${claimantName}</div>
                     <div><strong>Father / Husband Name:</strong> ${fatherNameVal}</div>
                     <div><strong>Date of Birth (Age):</strong> ${dateBirthVal} (${req.age} years)</div>
                     <div><strong>Date of Accident:</strong> ${dateAccidentVal}</div>
+                    <div style="grid-column: span 2;"><strong>Place of Accident:</strong> ${placeAccidentVal}</div>
                 </div>
 
-                <div class="results-details-grid">
-                    ${specificsHtml}
-                    <div class="math-formula-box">
-                        ${mathFormulaHtml}
+                <div class="parameters-summary-box" style="border: 1px solid var(--border-glass); border-radius: var(--radius-sm); background: rgba(255,255,255,0.02); padding: 16px; color: var(--text-primary);">
+                    <h4 style="margin-top: 0; margin-bottom: 12px; font-family: 'Outfit', sans-serif; font-size: 0.95rem; border-bottom: 1px solid var(--border-glass); padding-bottom: 6px; color: var(--color-primary); display: flex; align-items: center; gap: 8px;"><i class="fa-solid fa-list-check"></i> Calculation Parameters</h4>
+                    <div style="display: flex; flex-direction: column; gap: 8px; font-size: 0.85rem;">
+                        ${parametersHtml}
                     </div>
                 </div>
             </div>

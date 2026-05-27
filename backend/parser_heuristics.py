@@ -644,102 +644,90 @@ def classify_page_type(page_text, page_number):
 
 def format_suggestions_for_calculator(suggestions):
     """
-    Strict Indian MACT Calculator-Ready Structured Output Formatter.
-    Wraps all extracted parameters into the strict frontend UI target JSON schemas
-    with a confidence score engine block for each field.
-    DO NOT return unnecessary legal metadata.
+    Clean Minimal Legal Calculator-Ready Output Formatter.
+    Returns ONLY case_type, fields dictionary, and total_compensation.
+    Filters out fields with confidence score under 70%.
     """
     case_type = suggestions.get("case_type", "death")
     confidence_scores = suggestions.get("confidence_scores", {})
 
-    def get_field_obj(flat_key, default_val=""):
-        # Map some keys dynamically to match exact required UI schema keys
-        target_score_key = flat_key
-        if flat_key == "loss_of_consortium":
-            target_score_key = "consortium"
-        elif flat_key == "permanent_disability":
-            target_score_key = "disability"
-        elif flat_key == "injured_name":
-            target_score_key = "name"
-            
+    def get_field_val(flat_key, target_score_key, default_val=""):
         score_obj = confidence_scores.get(target_score_key)
         
         # Get raw value from suggestions flat structure first
-        # Fallback to key map, then confidence score value
         raw_val = suggestions.get(flat_key)
         if raw_val is None:
             if flat_key == "loss_of_consortium":
                 raw_val = suggestions.get("consortium")
             elif flat_key == "permanent_disability":
                 raw_val = suggestions.get("disability")
-            elif flat_key == "injured_name":
+            elif flat_key == "injured_name" or flat_key == "deceased_name":
                 raw_val = suggestions.get("name") or suggestions.get("claimant_name")
 
         if raw_val is None:
             raw_val = default_val
 
-        # If a confidence object is present, use its metadata
+        # Confidence Rule: If confidence < 70%: leave field blank. Never hallucinate values.
+        conf = 1.0
         if score_obj:
-            conf = score_obj.get("confidence", 0.5)
-            # Normalise to float confidence (e.g. 0.0 - 1.0)
+            conf = score_obj.get("confidence", 1.0)
             if conf > 1.0:
                 conf = conf / 100.0
-            return {
-                "value": raw_val,
-                "confidence": round(conf, 2),
-                "source_page": str(score_obj.get("source_page", "1")),
-                "source_section": str(score_obj.get("source_section", "raw_ocr")),
-                "extraction_method": str(score_obj.get("extraction_method", "Contextual Heuristics"))
-            }
         else:
-            # Fallback default dict
-            conf = 0.5 if raw_val != "" else 0.0
-            return {
-                "value": raw_val,
-                "confidence": conf,
-                "source_page": "1" if raw_val != "" else "",
-                "source_section": "raw_ocr" if raw_val != "" else "",
-                "extraction_method": "Default Heuristic" if raw_val != "" else ""
-            }
+            # Check if there is a general confidence fallback
+            conf = 1.0 if raw_val != "" else 0.0
 
+        if conf < 0.70:
+            return ""
+        return raw_val
+
+    fields = {}
     if case_type == "death":
-        return {
-            "case_type": case_type, # Keep as string for routing / selector matching
-            "deceased_name": get_field_obj("deceased_name"),
-            "father_name": get_field_obj("father_name"),
-            "date_of_accident": get_field_obj("date_of_accident"),
-            "date_of_birth": get_field_obj("date_of_birth"),
-            "place_of_accident": get_field_obj("place_of_accident"),
-            "age": get_field_obj("age"),
-            "marital_status": get_field_obj("marital_status"),
-            "monthly_income": get_field_obj("monthly_income"),
-            "future_prospect": get_field_obj("future_prospect"),
-            "loss_of_consortium": get_field_obj("loss_of_consortium"),
-            "loss_of_estate": get_field_obj("loss_estate"), # mapped to loss_estate in flat dict
-            "funeral_expenses": get_field_obj("funeral_expenses"),
-            "total_compensation": get_field_obj("total_compensation")
+        fields = {
+            "deceased_name": get_field_val("deceased_name", "deceased_name"),
+            "father_name": get_field_val("father_name", "father_name"),
+            "date_of_accident": get_field_val("date_of_accident", "date_of_accident"),
+            "date_of_birth": get_field_val("date_of_birth", "date_of_birth"),
+            "age": get_field_val("age", "age"),
+            "marital_status": get_field_val("marital_status", "marital_status", "married"),
+            "monthly_income": get_field_val("monthly_income", "monthly_income"),
+            "future_prospect": get_field_val("future_prospect", "future_prospect"),
+            "place_of_accident": get_field_val("place_of_accident", "place_of_accident"),
         }
     else: # injury case
-        return {
-            "case_type": case_type,
-            "injured_name": get_field_obj("injured_name"),
-            "father_name": get_field_obj("father_name"),
-            "date_of_accident": get_field_obj("date_of_accident"),
-            "date_of_birth": get_field_obj("date_of_birth"),
-            "place_of_accident": get_field_obj("place_of_accident"),
-            "age": get_field_obj("age"),
-            "monthly_income": get_field_obj("monthly_income"),
-            "dependents": get_field_obj("dependents"),
-            "permanent_disability": get_field_obj("permanent_disability"),
-            "medical_expenses": get_field_obj("medical_expenses"),
-            "pain_and_suffering": get_field_obj("pain_and_suffering"),
-            "transportation": get_field_obj("transportation"),
-            "special_diet": get_field_obj("special_diet"),
-            "attender_charges": get_field_obj("attender_charges"),
-            "future_medical_expenses": get_field_obj("future_medical_expenses"),
-            "loss_of_income": get_field_obj("loss_of_income"),
-            "total_compensation": get_field_obj("total_compensation")
+        fields = {
+            "injured_name": get_field_val("injured_name", "injured_name"),
+            "father_name": get_field_val("father_name", "father_name"),
+            "date_of_accident": get_field_val("date_of_accident", "date_of_accident"),
+            "date_of_birth": get_field_val("date_of_birth", "date_of_birth"),
+            "age": get_field_val("age", "age"),
+            "monthly_income": get_field_val("monthly_income", "monthly_income"),
+            "disability": get_field_val("disability", "disability"),
+            "dependents": get_field_val("dependents", "dependents"),
+            "medical_expenses": get_field_val("medical_expenses", "medical_expenses"),
+            "pain_and_suffering": get_field_val("pain_and_suffering", "pain_and_suffering"),
+            "transportation": get_field_val("transportation", "transportation"),
+            "special_diet": get_field_val("special_diet", "special_diet"),
+            "attender_charges": get_field_val("attender_charges", "attender_charges"),
+            "future_medical_expenses": get_field_val("future_medical_expenses", "future_medical_expenses"),
+            "loss_of_income": get_field_val("loss_of_income", "loss_of_income"),
         }
+
+    # Extract total compensation
+    tc_score = confidence_scores.get("total_compensation", {})
+    tc_conf = tc_score.get("confidence", 1.0)
+    if tc_conf > 1.0:
+        tc_conf /= 100.0
+    
+    total_comp = suggestions.get("total_compensation") or suggestions.get("award_amount") or ""
+    if tc_conf < 0.70:
+        total_comp = ""
+
+    return {
+        "case_type": case_type,
+        "fields": fields,
+        "total_compensation": total_comp
+    }
 
 
 def detect_document_sections(full_text, pages):
@@ -951,6 +939,7 @@ def extract_last_currency_value(line_lower):
 def extract_compensation_table_fields(section_content):
     """
     Extracts structured compensation fields strictly from the isolated compensation table area.
+    Optimized for Table-First Extraction and strict role/pleading avoidance.
     """
     fields = {
         "monthly_income": None,
@@ -972,6 +961,16 @@ def extract_compensation_table_fields(section_content):
         if not line_lower:
             continue
             
+        # Avoid advocate arguments, cited values, claimant demands, or insurer objections
+        avoid_kws = [
+            "claimant claimed", "claimant's demand", "pleaded", "averred", "sought", "demanded",
+            "advocate", "counsel", "contended", "argued", "submissions", "according to", "deposition of",
+            "sarlavarma", "pranaysethi", "reported in", "scc", "acj", "versus", "appeal by", "insurance co",
+            "deposit", "interest @", "rate of interest"
+        ]
+        if any(kw in line_lower for kw in avoid_kws):
+            continue
+
         val = extract_last_currency_value(line_lower)
         
         mult_match = re.search(r'\bmultiplier\b.*?\b(\d{1,2})\b', line_lower)
@@ -987,7 +986,7 @@ def extract_compensation_table_fields(section_content):
             fields["deduction"] = float(ded_pct_match.group(1))
             
         if val > 0:
-            if "monthly" in line_lower and any(kw in line_lower for kw in ["income", "salary", "earnings", "wage"]):
+            if "monthly" in line_lower and any(kw in line_lower for kw in ["income", "salary", "earnings", "wage", "notional"]):
                 fields["monthly_income"] = val
             elif any(kw in line_lower for kw in ["loss of dependency", "annual loss", "dependency"]):
                 fields["annual_loss_dependency"] = val
@@ -995,9 +994,9 @@ def extract_compensation_table_fields(section_content):
                 fields["funeral_expenses"] = val
             elif any(kw in line_lower for kw in ["consortium", "cohabitation"]):
                 fields["consortium"] = val
-            elif "total" in line_lower:
-                # Do not match the claimed amount as total compensation
-                if not any(kw in line_lower for kw in ["claim", "petition", "sought", "prayed", "valuation"]):
+            elif any(kw in line_lower for kw in ["total", "award", "awarded sum", "total compensation"]):
+                # Ensure no false positives for claim/interest/petition valuation
+                if not any(kw in line_lower for kw in ["claim", "petition", "sought", "prayed", "valuation", "demand"]):
                     fields["total_compensation"] = val
                 
     return fields

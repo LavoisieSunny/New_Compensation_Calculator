@@ -697,8 +697,63 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
         fallback_engine_used = ""
 
         page_details = []
+        
+        # Smart Page Filtering Before heavy OCR
+        from backend.parser_heuristics import classify_page_type
+        
         for idx, page_idx in enumerate(pages_to_scan):
-            text_lines.append(f"--- PAGE {page_idx+1} ---")
+            page_num = page_idx + 1
+            text_lines.append(f"--- PAGE {page_num} ---")
+            
+            # Step A: Check if digital text can be extracted fast
+            quick_text = ""
+            try:
+                import fitz
+                fitz_doc = fitz.open(file_path)
+                quick_text = fitz_doc[page_idx].get_text()
+            except Exception:
+                pass
+                
+            # Step B: If no digital text, do a fast low-res Tesseract scan (scale=1.0)
+            if not quick_text.strip() and is_tesseract_available():
+                try:
+                    low_res_pil = render_pdf_page_high_dpi(file_path, page_idx, scale=1.0)
+                    import pytesseract
+                    # Simple English Tesseract scan
+                    quick_text = pytesseract.image_to_string(low_res_pil, lang="eng")
+                except Exception as e:
+                    logger.debug(f"Low-res pre-OCR scan failed on page {page_num}: {str(e)}")
+            
+            # Step C: Classify page type
+            layout_type = "judgment text"
+            if quick_text.strip():
+                layout_type = classify_page_type(quick_text, page_num)
+                
+            # Step D: Filter & Ignore procedural pages
+            ignore_layouts = ["vakalatnama", "order sheet", "evidence", "annexure"]
+            
+            # Handwritten notes are skipped unless page 1 or containing critical award keywords
+            if layout_type == "handwritten note" and page_idx > 0:
+                text_lower = quick_text.lower()
+                has_critical_kws = any(kw in text_lower for kw in ["rs.", "award", "compensation", "dependency", "tribunal"])
+                if not has_critical_kws:
+                    ignore_layouts.append("handwritten note")
+                    
+            if layout_type in ignore_layouts:
+                logger.info(f"Page {page_num}/{total_pages}: Filtered pre-OCR as '{layout_type}'. Skipping heavy OCR pipeline!")
+                
+                # Mock page details
+                page_details.append({
+                    "page": page_num,
+                    "engine": "Filtered-Out",
+                    "confidence": 1.0,
+                    "text_length": 0
+                })
+                # Add placeholder filtered lines
+                text_lines.append(f"[Procedural page {page_num} filtered out: {layout_type}]")
+                successful_pages.append(page_num)
+                continue
+
             page_lines, page_meta = perform_ocr_page_with_retry(
                 ocr_engine, doc[page_idx], page_idx, total_pages, pdf_path=file_path
             )
