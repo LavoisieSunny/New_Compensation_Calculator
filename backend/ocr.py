@@ -843,15 +843,16 @@ def extract_award_amount_from_text(text_lines: list) -> float:
     LEGAL SAFETY: Only returns amounts found in actual OCR text.
     """
     award_patterns = [
-        r'(?:total|final|award|sum\s+of|compensation\s+of)\s*(?:award|amount|is|of)?\s*'
-        r'(?:rs\.?|inr|rupees)?\s*(\d{5,7})\b',
-        r'\b(?:rs\.?|inr)\s*(\d{5,7})\b\s*(?:with\s*interest|is\s*awarded|as\s*compensation)'
+        r'(?:total|final|award|sum\s+of|compensation\s+of)\s*(?:award|amount|is|of)?\s*(?:rs\.?|inr|rupees)?\s*([\d,]{5,10})\b',
+        r'\b(?:rs\.?|inr)\s*([\d,]{5,10})\b\s*(?:with\s*interest|is\s*awarded|as\s*compensation)'
     ]
     full_text_lower = "\n".join(text_lines).lower()
     for pat in award_patterns:
         m = re.findall(pat, full_text_lower)
         if m:
-            return float(m[0])
+            # clean commas and convert to float
+            cleaned = re.sub(r'[^\d]', '', m[0])
+            return float(cleaned)
     return 0.0
 
 

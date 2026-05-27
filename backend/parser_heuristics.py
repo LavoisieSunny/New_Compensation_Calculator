@@ -865,15 +865,25 @@ def real_text_recovery(petitioner_details, prayer_section, compensation_paragrap
     if age_m:
         recovered["age"] = int(age_m.group(1))
 
-    inc_m = re.search(r'\b(?:monthly\s+income|salary|earning|coolie|wages?)\b.*?(\d{4,6})\b', compensation_paragraphs)
+    # Extremely robust monthly income extraction that handles commas and currencies
+    inc_m = re.search(r'\b(?:monthly\s+income|salary|earning|coolie|wages?)\b\s*(?:is|was|of|@)?\s*(?:rs\.?|inr|rupees)?\s*([\d,]{4,10})\b', compensation_paragraphs, re.IGNORECASE)
+    if not inc_m:
+        # Fallback regex with broad search
+        inc_m = re.search(r'\b(?:monthly\s+income|salary|earning|coolie|wages?)\b.*?([\d,]{4,10})\b', compensation_paragraphs, re.IGNORECASE)
+        
     if inc_m:
-        recovered["monthly_income"] = float(inc_m.group(1))
+        recovered["monthly_income"] = parse_indian_rupee_value(inc_m.group(1))
 
     dep_m = re.search(r'\b(\d{1,2})\s*(?:dependents?|family\s+members)\b', petitioner_details)
     if dep_m:
         recovered["dependents"] = int(dep_m.group(1))
 
-    aw_m = re.search(r'\b(?:awarded|compensation\s+of\s+rs\.?|tribunal\s+awards)\s*([\d,\.]+)\b', award_section)
+    # Extremely robust award amount extraction that handles commas and currencies
+    aw_m = re.search(r'\b(?:awarded|compensation|award|sum\s+of)\s*(?:of|is|was|amounting\s+to)?\s*(?:rs\.?|inr|rupees)?\s*([\d,]{5,11})\b', award_section, re.IGNORECASE)
+    if not aw_m:
+        # Fallback regex with broad search
+        aw_m = re.search(r'\b(?:awarded|compensation\s+of\s+rs\.?|tribunal\s+awards)\s*([\d,\.]+)\b', award_section, re.IGNORECASE)
+        
     if aw_m:
         recovered["award_amount"] = parse_indian_rupee_value(aw_m.group(1))
 
@@ -1659,9 +1669,11 @@ def parse_extracted_text(text_lines):
                     break
 
         if not monthly_income:
-            m = re.search(r'\b(?:income|salary|wage|earning|earns)\b.*?(\d{4,6})\b', petition_block.lower())
+            m = re.search(r'\b(?:income|salary|wage|earning|earns)\b\s*(?:is|was|of|@)?\s*(?:rs\.?|inr|rupees)?\s*([\d,]{4,10})\b', petition_block.lower())
+            if not m:
+                m = re.search(r'\b(?:income|salary|wage|earning|earns)\b.*?([\d,]{4,10})\b', petition_block.lower())
             if m:
-                monthly_income = float(m.group(1))
+                monthly_income = parse_indian_rupee_value(m.group(1))
                 conf_monthly_income = 0.75
                 sec_monthly_income = "petition_block"
                 page_monthly_income = 1
