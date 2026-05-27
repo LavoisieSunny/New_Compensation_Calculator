@@ -199,6 +199,41 @@ class TestParserHeuristics(unittest.TestCase):
         self.assertEqual(scores["monthly_income"]["source_section"], "compensation_section")
         self.assertEqual(scores["monthly_income"]["source_page"], 3)
 
+    def test_parse_extracted_text_injury_table_flat_keys(self):
+        """Verify that the parser correctly extracts and maps complex table parameters into flat suggestion keys."""
+        ocr_lines = [
+            "--- PAGE 1 ---",
+            "CLAIM PETITION BEFORE THE TRIBUNAL",
+            "Claimants: Shri Suresh Kumar S/o Shri Ram Lal",
+            "Date of Birth: 01-01-1970 (Age: 55)",
+            "--- PAGE 2 ---",
+            "CHRONOLOGICAL EVENTS",
+            "25.12.2021 -> Date of accident",
+            "--- PAGE 3 ---",
+            "COMPENSATION AWARD COPY",
+            "Disability is assessed as 10%",
+            "We award the following compensation:",
+            "1. Medical Expenses: Rs. 50,000/-",
+            "2. Pain and Suffering: Rs. 40,000/-",
+            "3. Transportation: Rs. 15,000/-",
+            "4. Special Diet / Extra Nourishment: Rs. 10,000/-",
+            "5. Attender Charges: Rs. 12,000/-",
+            "6. Loss Of Earnings: Rs. 30,000/-",
+            "7. Future Medical Treatment: Rs. 20,000/-",
+            "Total Compensation awarded: Rs. 1,77,000/-"
+        ]
+        
+        suggestions = parse_extracted_text(ocr_lines)
+        
+        # Verify custom flat keys for injury table
+        self.assertEqual(suggestions["medical_expenses"], 50000.0)
+        self.assertEqual(suggestions["pain_and_suffering"], 40000.0)
+        self.assertEqual(suggestions["transportation"], 15000.0)
+        self.assertEqual(suggestions["special_diet"], 10000.0)
+        self.assertEqual(suggestions["attender_charges"], 12000.0)
+        self.assertEqual(suggestions["loss_of_income"], 30000.0)
+        self.assertEqual(suggestions["future_medical_expenses"], 20000.0)
+
 
 if __name__ == "__main__":
     unittest.main()

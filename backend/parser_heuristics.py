@@ -1798,6 +1798,32 @@ def parse_extracted_text(text_lines):
     if case_type == "death" and deceased_name:
         flat_name = deceased_name
 
+    # Helper to extract flat values from compensation_table
+    def get_table_value(keys):
+        for k in keys:
+            for t_key, t_val in compensation_table.items():
+                if k.lower() in t_key.lower():
+                    return t_val
+        return None
+
+    # Map table/heuristic values to flat fields
+    loss_estate_val = get_table_value(["estate"]) or estate_loss or 15000.0
+    
+    extracted_future_medical = get_table_value(["future medical"])
+    extracted_medical = None
+    for t_key, t_val in compensation_table.items():
+        if "medical" in t_key.lower() and "future" not in t_key.lower():
+            extracted_medical = t_val
+            break
+    if not extracted_medical:
+        extracted_medical = get_table_value(["medical"])
+        
+    extracted_pain = get_table_value(["pain"])
+    extracted_transport = get_table_value(["transport"])
+    extracted_diet = get_table_value(["nourishment", "diet"])
+    extracted_attender = get_table_value(["attender", "attendant"])
+    extracted_loss_income = get_table_value(["loss of income", "loss of earning", "earning"])
+
     suggestions = {
         "case_type": case_type,
         "compensation_mode": compensation_mode,
@@ -1824,6 +1850,15 @@ def parse_extracted_text(text_lines):
         "prayer": prayer,
         "citations": citations,
         
+        "loss_estate": loss_estate_val,
+        "medical_expenses": extracted_medical,
+        "future_medical_expenses": extracted_future_medical,
+        "pain_and_suffering": extracted_pain,
+        "transportation": extracted_transport,
+        "special_diet": extracted_diet,
+        "attender_charges": extracted_attender,
+        "loss_of_income": extracted_loss_income,
+
         "is_tamil_nadu": is_tamil_nadu,
         "mcop_number": mcop_number,
         "compensation_table": compensation_table,

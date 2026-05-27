@@ -685,7 +685,11 @@ document.addEventListener("DOMContentLoaded", () => {
             caseTypeSelect.dispatchEvent(new Event("change"));
         }
 
-        const standardKeys = ["name", "father_name", "dependents", "marital_status", "monthly_income", "disability", "place_of_accident"];
+        const standardKeys = [
+            "name", "father_name", "dependents", "marital_status", "monthly_income", "disability", "place_of_accident",
+            "consortium", "funeral_expenses", "loss_estate",
+            "medical_expenses", "future_medical_expenses", "pain_and_suffering", "transportation", "special_diet", "attender_charges", "loss_of_income"
+        ];
         standardKeys.forEach(key => {
             if (suggestions[key] !== undefined && suggestions[key] !== null && suggestions[key] !== "") {
                 const el = document.getElementById(key);
@@ -724,7 +728,17 @@ document.addEventListener("DOMContentLoaded", () => {
             "monthly_income": "monthly_income",
             "dependents": "dependents",
             "marital_status": "marital_status",
-            "disability": "disability"
+            "disability": "disability",
+            "consortium": "consortium",
+            "funeral_expenses": "funeral_expenses",
+            "loss_estate": "loss_estate",
+            "medical_expenses": "medical_expenses",
+            "future_medical_expenses": "future_medical_expenses",
+            "pain_and_suffering": "pain_and_suffering",
+            "transportation": "transportation",
+            "special_diet": "special_diet",
+            "attender_charges": "attender_charges",
+            "loss_of_income": "loss_of_income"
         };
 
         const processedInputIds = new Set();
