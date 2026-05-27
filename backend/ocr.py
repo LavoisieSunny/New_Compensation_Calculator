@@ -401,6 +401,30 @@ def run_tesseract_fallback(pil_img) -> tuple:
         return [], 0.0
 
 
+_TESSERACT_AVAILABLE = None
+
+def is_tesseract_available() -> bool:
+    global _TESSERACT_AVAILABLE
+    if _TESSERACT_AVAILABLE is not None:
+        return _TESSERACT_AVAILABLE
+    
+    import shutil
+    # Check default Windows path first
+    default_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if os.path.exists(default_path):
+        _TESSERACT_AVAILABLE = True
+        return True
+        
+    # Check if 'tesseract' command is in system PATH
+    if shutil.which("tesseract"):
+        _TESSERACT_AVAILABLE = True
+        return True
+        
+    _TESSERACT_AVAILABLE = False
+    logger.info("Tesseract binary not found on the system. Fallback OCR will be skipped safely.")
+    return False
+
+
 # ======================================================
 # 4-LAYER PER-PAGE OCR RETRY PIPELINE
 # ======================================================
@@ -450,6 +474,12 @@ def perform_ocr_page_with_retry(ocr_engine, page_doc, page_idx: int, total_pages
         result = ocr_engine.ocr(np.array(processed_pil))
         text_lines = extract_text_lines_from_paddle_result(result)
         confidence = calculate_paddle_confidence(result)
+        
+        # Override for successful PaddleX v3 extractions returning 0.00 confidence
+        if confidence == 0.00 and len(text_lines) >= 15:
+            confidence = 0.85
+            logger.info(f"Page {page_num}/{total_pages} - PaddleX v3 detected with {len(text_lines)} lines, setting confidence default to 0.85")
+            
         logger.info(f"Page {page_num}/{total_pages} - PaddleOCR: {len(text_lines)} lines, confidence: {confidence:.2f}")
     except Exception as e:
         logger.error(f"Page {page_num}/{total_pages} - PaddleOCR failed: {str(e)}")
@@ -467,7 +497,7 @@ def perform_ocr_page_with_retry(ocr_engine, page_doc, page_idx: int, total_pages
         text_density < 0.15
     )
 
-    if trigger_fallback:
+    if trigger_fallback and is_tesseract_available():
         logger.info(
             f"Page {page_num}/{total_pages} - Activating Tesseract fallback "
             f"(reason: empty={len(text_lines)==0}, confidence={confidence:.2f}<0.50, text_density={text_density:.2f}<0.15)"
@@ -655,6 +685,12 @@ def perform_ocr_on_image(file_path: str) -> tuple:
             result = ocr_engine.ocr(np.array(processed_pil))
             text_lines = extract_text_lines_from_paddle_result(result)
             confidence = calculate_paddle_confidence(result)
+            
+            # Override for successful PaddleX v3 extractions returning 0.00 confidence
+            if confidence == 0.00 and len(text_lines) >= 15:
+                confidence = 0.85
+                logger.info(f"Image - PaddleX v3 detected with {len(text_lines)} lines, setting confidence default to 0.85")
+                
             logger.info(f"Image - PaddleOCR: {len(text_lines)} lines, confidence: {confidence:.2f}")
         except Exception as e:
             logger.error(f"Image - PaddleOCR failed: {str(e)}")
@@ -668,7 +704,7 @@ def perform_ocr_on_image(file_path: str) -> tuple:
         )
 
         fallback_engine_used = ""
-        if trigger_fallback:
+        if trigger_fallback and is_tesseract_available():
             logger.info(
                 f"Image - Activating Tesseract fallback "
                 f"(reason: empty={len(text_lines)==0}, confidence={confidence:.2f}<0.50, text_density={text_density:.2f}<0.15)"
