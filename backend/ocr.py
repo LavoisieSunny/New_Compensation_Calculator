@@ -1,10 +1,13 @@
 import os
 import re
+import gc
 import shutil
 import tempfile
 import logging
 import uuid
+import threading
 import numpy as np
+from PIL import Image
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 from pypdf import PdfReader
 import pypdfium2 as pdfium
@@ -18,33 +21,15 @@ logger = logging.getLogger("OCRModule")
 
 router = APIRouter()
 
-# Global PaddleOCR instance (lazy initialized)
+# Global PaddleOCR instance (lazy initialized cached singleton)
 _ocr_instance = None
 OCR_INITIALIZED = False
-
-# Global EasyOCR instance (lazy initialized on first L4 call)
-_easyocr_reader = None
 
 # Global Batch Upload and Indexing Process Queue
 BATCH_QUEUE = {}
 
-# Whether to prefer Tesseract OCR on Windows (speeds up CPU processing and prevents Paddle C++ crashes)
-PREFER_TESSERACT = True
-
-# ======================================================
-# OCR QUALITY GATE THRESHOLD
-# Below this score, legal reconstruction is DISABLED.
-# Fields are left blank rather than hallucinated.
-# ======================================================
+# OCR Quality Gate Threshold
 OCR_QUALITY_GATE_THRESHOLD = 0.05
-
-# ======================================================
-# PER-PAGE QUALITY THRESHOLDS FOR RETRY LAYERS
-# ======================================================
-PAGE_QUALITY_L1 = 0.50   # Accept PaddleOCR scale=2
-PAGE_QUALITY_L2 = 0.40   # Accept PaddleOCR scale=3
-PAGE_QUALITY_L3 = 0.35   # Accept PaddleOCR + enhanced preprocessing
-PAGE_QUALITY_L4 = 0.20   # Minimum accept from EasyOCR
 
 # Legal keywords that signal valid legal document content
 _LEGAL_QUALITY_KEYWORDS = [
@@ -55,66 +40,57 @@ _LEGAL_QUALITY_KEYWORDS = [
 
 
 # ======================================================
-# OCR ENGINE INITIALIZATION
+# PADDLEOCR SINGLETON INITIALIZATION
 # ======================================================
 
 def get_ocr_instance():
+    """Returns the cached global singleton PaddleOCR instance."""
     global _ocr_instance, OCR_INITIALIZED
     if _ocr_instance is None:
         try:
-            logger.info("Initializing PaddleOCR (disabling MKLDNN to avoid oneDNN PIR crash)...")
+            logger.info("Initializing PaddleOCR Singleton (disabling MKLDNN to avoid PIR crashes)...")
             from paddleocr import PaddleOCR
             _ocr_instance = PaddleOCR(lang='en', enable_mkldnn=False)
             OCR_INITIALIZED = True
-            logger.info("PaddleOCR successfully loaded!")
+            logger.info("PaddleOCR Singleton successfully loaded!")
         except Exception as e:
-            logger.error(f"Failed to initialize PaddleOCR: {str(e)}")
+            logger.error(f"Failed to initialize PaddleOCR Singleton: {str(e)}")
             _ocr_instance = None
             OCR_INITIALIZED = False
     return _ocr_instance
 
 
-def get_easyocr_reader():
-    global _easyocr_reader
-    if _easyocr_reader is None:
-        try:
-            logger.info("Initializing EasyOCR reader (English)...")
-            import easyocr
-            _easyocr_reader = easyocr.Reader(['en'], gpu=False)
-            logger.info("EasyOCR Reader successfully loaded!")
-        except Exception as e:
-            logger.error(f"Failed to initialize EasyOCR: {str(e)}")
-            _easyocr_reader = None
-    return _easyocr_reader
+# ======================================================
+# OCR TIMEOUT GUARD
+# ======================================================
 
+def run_with_timeout(func, args=(), kwargs={}, timeout=40.0):
+    """
+    Runs a function in a daemon thread and enforces a hard timeout limit.
+    Protects uvicorn/fastapi request process loops from hung/corrupted OCR pages.
+    """
+    class FuncThread(threading.Thread):
+        def __init__(self):
+            threading.Thread.__init__(self)
+            self.result = None
+            self.exception = None
+            self.daemon = True
 
-def run_easyocr_fallback(pil_img) -> tuple:
-    """
-    Fallback OCR engine using EasyOCR.
-    Returns: (text_lines: list[str], avg_confidence: float)
-    """
-    reader = get_easyocr_reader()
-    if reader is None:
-        logger.warning("EasyOCR fallback triggered but EasyOCR is unavailable.")
-        return [], 0.0
-    try:
-        img_np = np.array(pil_img)
-        results = reader.readtext(img_np)
-        
-        text_lines = []
-        confidences = []
-        for bbox, text, conf in results:
-            text = text.strip()
-            if text:
-                text_lines.append(text)
-                confidences.append(float(conf))
-                
-        avg_conf = float(np.mean(confidences)) if confidences else 0.0
-        logger.info(f"EasyOCR fallback success: {len(text_lines)} lines extracted (avg confidence {avg_conf:.2f})")
-        return text_lines, avg_conf
-    except Exception as e:
-        logger.warning(f"EasyOCR execution failed: {str(e)}")
-        return [], 0.0
+        def run(self):
+            try:
+                self.result = func(*args, **kwargs)
+            except Exception as e:
+                self.exception = e
+
+    thread = FuncThread()
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        logger.warning(f"OCR execution timed out after {timeout} seconds on thread {thread.ident}.")
+        return None, "timeout"
+    if thread.exception:
+        raise thread.exception
+    return thread.result, "success"
 
 
 # ======================================================
@@ -124,7 +100,7 @@ def run_easyocr_fallback(pil_img) -> tuple:
 def extract_digital_pdf_text(file_path: str) -> list:
     """
     Extracts text lines from a digital (selectable) PDF using PyPDF.
-    Extremely fast (~20ms per doc) and 100% accurate for digital PDFs.
+    Extremely fast and 100% accurate for digital PDFs.
     """
     try:
         reader = PdfReader(file_path)
@@ -147,7 +123,6 @@ def extract_alternate_pdf_text(file_path: str) -> list:
     """
     Alternate layout extraction using PyMuPDF (fitz) and pdfplumber.
     Used when PaddleOCR returns sparse results on scanned PDFs.
-    LEGAL SAFETY: Only returns actual extracted text. Never fabricates data.
     """
     text_lines = []
 
@@ -196,18 +171,82 @@ def extract_alternate_pdf_text(file_path: str) -> list:
 
 
 # ======================================================
-# IMAGE PREPROCESSING — STANDARD
+# VISUAL PAGE CLASSIFIER & ENTROPY CHECK
 # ======================================================
 
-def preprocess_image_safe(pil_img, resize_factor=None, binarize=False):
+def classify_scanned_page(pil_img) -> str:
     """
-    Safe preprocessing pipeline for high-clarity legal documents.
-    Pipeline:
-    - Grayscale
-    - Bilateral filter or fastNlMeansDenoising for noise removal (preserving text edges)
-    - CLAHE (clipLimit=2.0, tileGridSize=(8, 8))
-    - If binarize is True: Otsu thresholding and morphology close operation (best for Tesseract)
-    - If binarize is False: Light sharpening only (best for PaddleOCR)
+    Intelligent pre-OCR Page Classifier.
+    Analyzes visual entropy (stddev) and edge pixel density.
+    Bypasses blank, separator, or low-entropy pages from OCR to protect memory.
+    """
+    try:
+        import cv2
+        open_cv_image = np.array(pil_img)
+        if len(open_cv_image.shape) == 3:
+            gray = cv2.cvtColor(open_cv_image, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = open_cv_image.copy()
+
+        stddev = np.std(gray)
+        logger.info(f"Page Classifier: Grayscale standard deviation = {stddev:.2f}")
+
+        # Completely blank scan/separator detection
+        if stddev < 7.0:
+            return "scanned_blank"
+
+        # Count high-contrast edge/text pixels
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        white_pixels = np.sum(thresh == 255)
+        total_pixels = thresh.size
+        ratio = white_pixels / total_pixels
+        logger.info(f"Page Classifier: Text/Edge pixel ratio = {ratio:.4f}")
+
+        # If less than 0.15% has content, classify as blank
+        if ratio < 0.0015:
+            return "scanned_blank"
+
+        # If massive dark blocks (large pictures, non-text)
+        if ratio > 0.40:
+            return "image_only"
+
+        return "dense_text"
+    except Exception as e:
+        logger.warning(f"Fast page classification failed, defaulting to dense_text: {str(e)}")
+        return "dense_text"
+
+
+# ======================================================
+# MAX PAGE MEMORY GUARD (DOWNSCALE GUARD)
+# ======================================================
+
+def guard_and_downscale_image(pil_img):
+    """
+    Automatically scales down extremely high-resolution images to prevent OOM.
+    Applies if width > 5000px OR estimated bitmap memory footprint > 120MB.
+    """
+    width, height = pil_img.size
+    est_memory = width * height * 3
+    
+    if width > 5000 or est_memory > 120 * 1024 * 1024:
+        logger.info(f"Max Page Memory Guard Triggered: {width}x{height} image (Est memory: {est_memory / (1024*1024):.1f}MB)")
+        # Scale down to a safe width max of 2000px preserving aspect ratio
+        ratio = min(2000.0 / width, (120.0 * 1024 * 1024 / est_memory) ** 0.5)
+        new_width = int(width * ratio)
+        new_height = int(height * ratio)
+        logger.info(f"Downscaling image to {new_width}x{new_height} for stable execution.")
+        return pil_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    return pil_img
+
+
+# ======================================================
+# SAFE PREPROCESSING — LIGHTWEIGHT
+# ======================================================
+
+def preprocess_image_light(pil_img, binarize=True):
+    """
+    Minimal and lightweight preprocessing to prevent massive array allocations.
+    Applies only: Grayscale conversion, Light Gaussian denoise, CLAHE, Adaptive threshold.
     """
     try:
         import cv2
@@ -220,36 +259,26 @@ def preprocess_image_safe(pil_img, resize_factor=None, binarize=False):
         else:
             gray = open_cv_image.copy()
 
-        # 2. Denoising (Bilateral preserves sharp text edges)
-        denoised = cv2.bilateralFilter(gray, 5, 50, 50)
+        # 2. Light denoise (Gaussian blur)
+        denoised = cv2.GaussianBlur(gray, (3, 3), 0)
 
-        # 3. CLAHE
+        # 3. CLAHE (Contrast Enhancement)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         contrast = clahe.apply(denoised)
 
+        # 4. Adaptive thresholding
         if binarize:
-            # 4. Otsu's thresholding
-            _, thresh = cv2.threshold(contrast, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            # 5. Morphology close
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-            processed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-            return Image.fromarray(processed).convert("RGB")
+            processed = cv2.adaptiveThreshold(
+                contrast, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY, 11, 2
+            )
         else:
-            # 4. Light sharpening
-            blurred = cv2.GaussianBlur(contrast, (0, 0), 2.0)
-            sharpened = cv2.addWeighted(contrast, 1.2, blurred, -0.2, 0)
-            return Image.fromarray(sharpened).convert("RGB")
+            processed = contrast
+
+        return Image.fromarray(processed).convert("RGB")
     except Exception as e:
-        logger.warning(f"Safe preprocessing failed, returning original image: {str(e)}")
+        logger.warning(f"Lightweight preprocessing failed, returning original: {str(e)}")
         return pil_img
-
-
-def preprocess_image_for_ocr(pil_img):
-    return preprocess_image_safe(pil_img, resize_factor=2)
-
-
-def preprocess_image_enhanced(pil_img):
-    return preprocess_image_safe(pil_img, resize_factor=3)
 
 
 # ======================================================
@@ -258,15 +287,15 @@ def preprocess_image_enhanced(pil_img):
 
 def render_pdf_page_high_dpi(pdf_path: str, page_idx: int, scale: float = 3.0):
     """
-    Renders a specific page of a PDF at high DPI (default scale=3.0, approx 220 DPI) using pypdfium2.
-    Highly reliable, fast, in-process rendering without requiring external binary dependencies like Poppler.
+    Renders a specific page of a PDF using pypdfium2.
+    Scale 3.0 corresponds exactly to 216 DPI.
     """
     try:
         import pypdfium2 as pdfium
         doc = pdfium.PdfDocument(pdf_path)
         page = doc[page_idx]
         bitmap = page.render(scale=scale)
-        logger.info(f"Page {page_idx+1} rendered at scale {scale} (approx {int(scale * 72)} DPI) using pypdfium2.")
+        logger.info(f"Page {page_idx+1} rendered at scale {scale} (approx {int(scale * 72)} DPI).")
         return bitmap.to_pil()
     except Exception as ex:
         logger.error(f"Failed to render page {page_idx+1} using pypdfium2: {str(ex)}")
@@ -274,10 +303,9 @@ def render_pdf_page_high_dpi(pdf_path: str, page_idx: int, scale: float = 3.0):
 
 
 def save_ocr_debug_image(filename: str, img):
-    """
-    Saves a debug image for OCR inspection.
-    Supports both PIL Image and numpy array (OpenCV format).
-    """
+    """Saves a debug image ONLY if DEBUG_OCR environment variable is true."""
+    if os.getenv("DEBUG_OCR", "false").lower() != "true":
+        return
     try:
         import cv2
         from PIL import Image
@@ -297,15 +325,11 @@ def save_ocr_debug_image(filename: str, img):
 
 
 # ======================================================
-# OCR RESULT NORMALIZER
+# OCR RESULT NORMALIZER & CONFIDENCE
 # ======================================================
 
 def extract_text_lines_from_paddle_result(result) -> list:
-    """
-    Normalises PaddleOCR output across v2 (list-of-lists) and
-    PaddleX v3 (object with rec_texts) output formats.
-    Returns a flat deduplicated list of non-empty text strings.
-    """
+    """Normalizes raw PaddleOCR text lines extraction."""
     text_lines = []
     if not result or len(result) == 0:
         return text_lines
@@ -327,57 +351,8 @@ def extract_text_lines_from_paddle_result(result) -> list:
     return [l.strip() for l in text_lines if l and l.strip()]
 
 
-# ======================================================
-# OCR QUALITY SCORING
-# ======================================================
-
-def score_ocr_page_quality(text_lines: list) -> float:
-    """
-    Scores the OCR output quality for a single page.
-    Returns float 0.0 – 1.0 based on 4 weighted criteria:
-      - line_count       (30%): More lines → better
-      - keyword_hits     (35%): Legal MACT keywords detected
-      - word_quality     (20%): Average word length (garble detection)
-      - text_density     (15%): Characters per line
-    """
-    real_lines = [l for l in text_lines if l and not l.startswith("--- PAGE")]
-    if not real_lines:
-        return 0.0
-
-    # 1. Line count score
-    line_score = min(len(real_lines) / 10.0, 1.0)
-
-    # 2. Legal keyword score
-    full_text = " ".join(real_lines).lower()
-    kw_hits = sum(1 for kw in _LEGAL_QUALITY_KEYWORDS if kw in full_text)
-    keyword_score = min(kw_hits / 5.0, 1.0)
-
-    # 3. Word quality score (garbled OCR = very short or very long tokens)
-    words = full_text.split()
-    if words:
-        avg_len = sum(len(w) for w in words) / len(words)
-        # Ideal word length: 3–10 chars
-        word_score = 1.0 if 3.0 <= avg_len <= 10.0 else max(0.0, 1.0 - abs(avg_len - 6.5) / 6.5)
-    else:
-        word_score = 0.0
-
-    # 4. Text density score (chars per line)
-    avg_line_len = sum(len(l) for l in real_lines) / len(real_lines)
-    density_score = min(avg_line_len / 40.0, 1.0)
-
-    quality = (
-        (line_score    * 0.30) +
-        (keyword_score * 0.35) +
-        (word_score    * 0.20) +
-        (density_score * 0.15)
-    )
-    return round(quality, 3)
-
-
 def calculate_paddle_confidence(result) -> float:
-    """
-    Calculates the average confidence score from a raw PaddleOCR result.
-    """
+    """Calculates the average confidence score from a raw PaddleOCR result."""
     confidences = []
     if not result or len(result) == 0:
         return 0.0
@@ -389,6 +364,40 @@ def calculate_paddle_confidence(result) -> float:
                 elif isinstance(line, tuple) and len(line) > 1 and isinstance(line[1], float):
                     confidences.append(line[1])
     return float(np.mean(confidences)) if confidences else 0.0
+
+
+# ======================================================
+# OCR QUALITY SCORING
+# ======================================================
+
+def score_ocr_page_quality(text_lines: list) -> float:
+    """Scores OCR text output quality based on keywords, line counts, and garble checks."""
+    real_lines = [l for l in text_lines if l and not l.startswith("--- PAGE")]
+    if not real_lines:
+        return 0.0
+
+    line_score = min(len(real_lines) / 10.0, 1.0)
+    full_text = " ".join(real_lines).lower()
+    kw_hits = sum(1 for kw in _LEGAL_QUALITY_KEYWORDS if kw in full_text)
+    keyword_score = min(kw_hits / 5.0, 1.0)
+
+    words = full_text.split()
+    if words:
+        avg_len = sum(len(w) for w in words) / len(words)
+        word_score = 1.0 if 3.0 <= avg_len <= 10.0 else max(0.0, 1.0 - abs(avg_len - 6.5) / 6.5)
+    else:
+        word_score = 0.0
+
+    avg_line_len = sum(len(l) for l in real_lines) / len(real_lines)
+    density_score = min(avg_line_len / 40.0, 1.0)
+
+    quality = (
+        (line_score    * 0.30) +
+        (keyword_score * 0.35) +
+        (word_score    * 0.20) +
+        (density_score * 0.15)
+    )
+    return round(quality, 3)
 
 
 def _build_ocr_debug(
@@ -421,7 +430,7 @@ def _build_ocr_debug(
 
 
 # ======================================================
-# SECONDARY OCR ENGINE — Tesseract Fallback
+# CONTINGENCY OCR ENGINE — Tesseract Fallback
 # ======================================================
 
 _TESSERACT_AVAILABLE = None
@@ -431,17 +440,12 @@ def init_tesseract():
     global _TESSERACT_INITIALIZED
     if _TESSERACT_INITIALIZED:
         return
-    
     try:
         import pytesseract
-        # Clean system PATH check
         tess_path = shutil.which("tesseract")
-        
         if tess_path:
             pytesseract.pytesseract.tesseract_cmd = tess_path
             logger.info(f"Tesseract found and configured at: {tess_path}")
-        else:
-            logger.warning("Tesseract binary not found in PATH.")
     except Exception as e:
         logger.warning(f"Error during Tesseract path initialization: {str(e)}")
     _TESSERACT_INITIALIZED = True
@@ -451,578 +455,236 @@ def is_tesseract_available() -> bool:
     global _TESSERACT_AVAILABLE
     if _TESSERACT_AVAILABLE is not None:
         return _TESSERACT_AVAILABLE
-        
     init_tesseract()
-    
     try:
         import pytesseract
-        # Verify it can execute
-        version = pytesseract.get_tesseract_version()
-        logger.info(f"Tesseract version {version} is available and verified.")
+        pytesseract.get_tesseract_version()
         _TESSERACT_AVAILABLE = True
-    except Exception as e:
-        logger.warning(f"Tesseract binary is not available or failed to execute: {str(e)}")
+    except Exception:
         _TESSERACT_AVAILABLE = False
-        
     return _TESSERACT_AVAILABLE
 
+
 def run_tesseract_fallback(pil_img) -> tuple:
-    """
-    Fallback OCR engine using Tesseract (pytesseract).
-    Configured dynamically. Graces fallbacks if hin.traineddata is missing.
-    Returns: (text_lines: list[str], avg_confidence: float)
-    """
+    """Lightweight fallback OCR using Tesseract (pytesseract)."""
     if not is_tesseract_available():
-        logger.warning("Tesseract fallback triggered but Tesseract is unavailable.")
         return [], 0.0
-        
     try:
         import pytesseract
-        
-        # Try eng+hin multi-language OCR first
         try:
             text_str = pytesseract.image_to_string(pil_img, lang="eng+hin")
             config_lang = "eng+hin"
-        except Exception as lang_err:
-            logger.info(f"Tesseract Hindi pack missing or failed ({str(lang_err)}), falling back to English only.")
+        except Exception:
             text_str = pytesseract.image_to_string(pil_img, lang="eng")
             config_lang = "eng"
             
         text_lines = [line.strip() for line in text_str.split("\n") if line.strip()]
         
-        # Get confidence scores using image_to_data
         confidences = []
         try:
             data = pytesseract.image_to_data(pil_img, lang=config_lang, output_type=pytesseract.Output.DICT)
+            if isinstance(data, dict) and 'conf' in data:
+                for c in data['conf']:
+                    try:
+                        val = float(c)
+                        if val >= 0:
+                            confidences.append(val / 100.0)
+                    except ValueError:
+                        continue
         except Exception:
-            try:
-                data = pytesseract.image_to_data(pil_img, lang="eng", output_type=pytesseract.Output.DICT)
-            except Exception:
-                data = {}
-            
-        if isinstance(data, dict) and 'conf' in data:
-            for c in data['conf']:
-                try:
-                    val = float(c)
-                    if val >= 0: # -1 indicates empty/layout block
-                        confidences.append(val / 100.0) # convert 0-100 to 0.0-1.0
-                except ValueError:
-                    continue
+            pass
         
         avg_conf = float(np.mean(confidences)) if confidences else 0.0
-        logger.info(f"Tesseract fallback ({config_lang}): {len(text_lines)} lines extracted (avg confidence {avg_conf:.2f})")
         return text_lines, avg_conf
     except Exception as e:
         logger.warning(f"Tesseract fallback failed: {str(e)}")
         return [], 0.0
 
 
-def deskew_image(gray_img):
-    """
-    Detects skew angle and rotates the image to straighten the text lines.
-    """
-    try:
-        import cv2
-        # Threshold the image (text becomes white, background black)
-        thresh = cv2.threshold(gray_img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
-        
-        # Get coordinates of all text pixels
-        coords = np.column_stack(np.where(thresh > 0))
-        
-        # Calculate skew angle
-        angle = cv2.minAreaRect(coords)[-1]
-        
-        # minAreaRect returns angle in range [-90, 0)
-        if angle < -45:
-            angle = -(90 + angle)
-        else:
-            angle = -angle
-            
-        # Ignore extremely tiny skews to avoid interpolation blur
-        if abs(angle) < 0.5 or abs(angle) > 45:
-            return gray_img
-            
-        # Perform rotation to straighten
-        (h, w) = gray_img.shape[:2]
-        center = (w // 2, h // 2)
-        M = cv2.getRotationMatrix2D(center, angle, 1.0)
-        rotated = cv2.warpAffine(gray_img, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-        logger.info(f"Auto-deskewed image by rotation angle: {angle:.2f} degrees")
-        return rotated
-    except Exception as e:
-        logger.warning(f"Deskewing failed: {str(e)}")
-        return gray_img
-
-
-def preprocess_image_premium(pil_img, binarize=False):
-    """
-    Premium preprocessing pipeline applying:
-    - Grayscale
-    - Deskew (auto-straightening)
-    - Denoise (Bilateral filter to preserve sharp text boundaries)
-    - Contrast enhancement (CLAHE)
-    - Sharpening (Unsharp masking)
-    - Adaptive Thresholding & Morphology (if binarize is True)
-    """
-    try:
-        import cv2
-        from PIL import Image
-        
-        open_cv_image = np.array(pil_img)
-        # 1. Grayscale
-        if len(open_cv_image.shape) == 3:
-            gray = cv2.cvtColor(open_cv_image, cv2.COLOR_RGB2GRAY)
-        else:
-            gray = open_cv_image.copy()
-            
-        # 2. Deskew
-        deskewed = deskew_image(gray)
-        
-        # 3. Denoise
-        denoised = cv2.bilateralFilter(deskewed, 9, 75, 75)
-        
-        # 4. CLAHE contrast enhancement
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-        contrast = clahe.apply(denoised)
-        
-        # 5. Sharpening (High contrast sharpening kernel)
-        sharpening_kernel = np.array([
-            [0, -1, 0],
-            [-1, 5, -1],
-            [0, -1, 0]
-        ])
-        sharpened = cv2.filter2D(contrast, -1, sharpening_kernel)
-        
-        # 6. Adaptive Threshold or binarization
-        if binarize:
-            thresh = cv2.adaptiveThreshold(
-                sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                cv2.THRESH_BINARY, 15, 8
-            )
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-            processed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-            return Image.fromarray(processed).convert("RGB")
-        else:
-            return Image.fromarray(sharpened).convert("RGB")
-    except Exception as e:
-        logger.warning(f"Premium preprocessing failed, returning original PIL image: {str(e)}")
-        return pil_img
-
-
-def score_ocr_attempt(text_lines: list) -> dict:
-    """
-    Scores an OCR attempt's text output based on:
-    - line count (up to 30 lines)
-    - keyword density (frequency of legal words)
-    - legal entity matches (roles like claimant/respondent, prefixes, etc.)
-    - compensation table matches (rupee/rs. values, multipliers, disability %)
-    Returns a dict with overall 'score' and sub-metrics.
-    """
-    if not text_lines:
-        return {"score": 0.0, "lines": 0, "kw_density": 0.0, "legal_entities": 0, "table_matches": 0}
-        
-    real_lines = [l for l in text_lines if l and not l.strip().startswith("--- PAGE")]
-    line_count = len(real_lines)
-    if line_count == 0:
-        return {"score": 0.0, "lines": 0, "kw_density": 0.0, "legal_entities": 0, "table_matches": 0}
-        
-    full_text = "\n".join(real_lines).lower()
-    
-    # 1. Line count score
-    line_score = min(line_count / 30.0, 1.0)
-    
-    # 2. Keyword density (legal keywords)
-    legal_keywords = [
-        "tribunal", "claimant", "petitioner", "mact", "mcop", "accident",
-        "compensation", "disability", "income", "award", "court",
-        "deceased", "injured", "monthly", "insurance", "motor", "claim",
-        "respondent", "versus", "v/s", "judgement", "order", "liability"
-    ]
-    kw_hits = sum(1 for kw in legal_keywords if kw in full_text)
-    words = full_text.split()
-    word_count = len(words)
-    kw_density = kw_hits / max(word_count, 1)
-    # Scaled keyword score
-    kw_density_score = min(kw_hits / 5.0, 1.0)
-    
-    # 3. Legal entity matches
-    legal_entity_patterns = [
-        r"\b(?:m/s|shri|smt|kumari|mr|mrs|miss)\.?\s+[a-z]+", # Names prefixes
-        r"\b(?:tribunal|court|judge|mact|mcop)\b",
-        r"\b(?:insurance|co\.?|ltd\.?|limited|corp(?:oration)?)\b",
-        r"\b(?:claimant|petitioner|respondent|appellant|defendant|plaintiff)\b"
-    ]
-    entity_matches = 0
-    for pat in legal_entity_patterns:
-        entity_matches += len(re.findall(pat, full_text))
-    entity_score = min(entity_matches / 4.0, 1.0)
-    
-    # 4. Compensation table matches
-    comp_table_patterns = [
-        r"\b(?:rs\.?|inr|rupees)\.?\s*\d+",
-        r"\b\d+\s*%\s*(?:disability|permanent|partial|temporary)\b",
-        r"\b(?:loss\s+of\s+earning(?:s)?|loss\s+of\s+dependency|future\s+prospects)\b",
-        r"\bmultiplier\s+(?:of\s+)?\d+\b",
-        r"\b(?:consortium|funeral|medical\s+expenses|pain\s+and\s+suffering|loss\s+of\s+estate)\b"
-    ]
-    table_matches = 0
-    for pat in comp_table_patterns:
-        table_matches += len(re.findall(pat, full_text))
-    table_score = min(table_matches / 3.0, 1.0)
-    
-    # Total weighted score
-    total_score = (
-        (line_score * 0.25) +
-        (kw_density_score * 0.25) +
-        (entity_score * 0.25) +
-        (table_score * 0.25)
-    )
-    
-    return {
-        "score": round(total_score, 4),
-        "lines": line_count,
-        "kw_density": round(kw_density, 4),
-        "legal_entities": entity_matches,
-        "table_matches": table_matches
-    }
-
-
-def classify_page_for_ocr(page_text: str) -> str:
-    """
-    Classifies a page to decide whether to skip it or process/prioritize it,
-    based on the quick-extracted text.
-    Returns: 'prioritize', 'standard', 'skip_notice', 'skip_annexure', 'skip_procedural', 'skip_signature'
-    """
-    text_lower = page_text.lower()
-    
-    # Prioritize keywords
-    award_kws = ["compensation", "quantum", "multiplier", "dependency", "consortium", "funeral", "estate", "loss of", "pain and suffering", "medical expenses", "award amount", "awarded sum", "total compensation"]
-    chronology_kws = ["chronology", "chronological events", "list of dates", "date of accident", "petition filed"]
-    scrutiny_kws = ["scrutiny report", "scrutiny sheet", "office report", "limitation period"]
-    claimant_kws = ["details of claimants", "details of petitioners", "claimant details", "petitioner details", "legal representatives", "cause title", "party details"]
-    
-    # Check if page has award or priority details first - we must NEVER skip pages with these!
-    if any(kw in text_lower for kw in award_kws):
-        return "prioritize"
-    if any(kw in text_lower for kw in chronology_kws):
-        return "prioritize"
-    if any(kw in text_lower for kw in scrutiny_kws):
-        return "prioritize"
-    if any(kw in text_lower for kw in claimant_kws):
-        return "prioritize"
-        
-    # Skip keywords
-    notice_kws = ["summons", "registry notice", "notice of motion", "under section 143", "show cause notice"]
-    annexure_kws = ["annexure", "exhibit", "driving license", "rc book", "insurance policy", "fir copy", "post mortem report", "inquest report"]
-    procedural_kws = ["vakalatnama", "vakalath", "power of attorney", "order sheet", "proceeding sheet", "evidence list", "deposition of", "examination-in-chief", "cross-examination"]
-    signature_kws = ["signature of", "thumb impression", "sd/-", "signed before me", "advocate for petitioner", "advocate for respondent"]
-    
-    if any(kw in text_lower for kw in notice_kws):
-        return "skip_notice"
-    if any(kw in text_lower for kw in annexure_kws):
-        return "skip_annexure"
-    if any(kw in text_lower for kw in procedural_kws):
-        return "skip_procedural"
-    if any(kw in text_lower for kw in signature_kws):
-        return "skip_signature"
-        
-    return "standard"
-
-
 # ======================================================
-# 4-LAYER PER-PAGE OCR RETRY PIPELINE
+# STABILIZED SEQUENTIAL PAGE OCR STAGE
 # ======================================================
 
-# ======================================================
-# STABILIZED PER-PAGE OCR PIPELINE
-# ======================================================
-
-def perform_ocr_page_with_retry(ocr_engine, page_doc, page_idx: int, total_pages: int, pdf_path: str = None) -> tuple:
+def perform_ocr_page_stable(ocr_engine, page_doc, page_idx: int, total_pages: int, pdf_path: str = None) -> tuple:
     """
-    Performs the 5-attempt multi-stage OCR retry pipeline on a single PDF page:
-    Attempt 1: PaddleOCR at 216 DPI (scale=3.0)
-    Attempt 2: PaddleOCR at 300 DPI (scale=4.167)
-    Attempt 3: Tesseract fallback on binarized 300 DPI preprocessed image
-    Attempt 4: PyMuPDF page text extraction (checks selectable/digital text)
-    Attempt 5: EasyOCR fallback on 300 DPI preprocessed image
-    
-    Chooses the BEST result using `score_ocr_attempt` across all attempted stages.
+    Performs stable single-pass OCR on a page.
+    1. PYMUPDF Digital Selectable Text Check (TRUST native text first)
+    2. Visual Page Classification (Skip blank / separator pages)
+    3. Memory downscale guards for extremely large pages
+    4. Lightweight preprocessing
+    5. Single-pass PaddleOCR at 216 DPI (with timeout guard)
+    6. Conditionally allow a 300 DPI retry only if conf < 0.20 and pages <= 3
+    7. Basic last-resort Tesseract fallback
+    8. Strict page-wise variable deletion and garbage collection
     """
     page_num = page_idx + 1
     logger.info(f"--- START OCR PIPELINE FOR PAGE {page_num}/{total_pages} ---")
     
-    best_lines = []
-    best_conf = 0.0
-    best_score = -1.0
-    best_meta = {
-        "engine": "None",
-        "dpi": 0,
-        "confidence": 0.0,
-        "preprocessing_applied": [],
-        "quality_score": 0.0,
-        "lines": 0
-    }
-    
-    # Render scales corresponding to 216 and 300 DPI (72 pt per inch)
-    scale_216 = 3.0
-    scale_300 = 4.167
-    
-    # --------------------------------------------------
-    # ATTEMPT 1: PaddleOCR at 216 DPI
-    # --------------------------------------------------
-    logger.info(f"Page {page_num}: Running Attempt 1 (PaddleOCR @ 216 DPI)...")
-    try:
-        pil_216 = render_pdf_page_high_dpi(pdf_path, page_idx, scale=scale_216) if pdf_path else page_doc.render(scale=scale_216).to_pil()
-        processed_216 = preprocess_image_premium(pil_216, binarize=False)
-        
-        # Save debug images
-        save_ocr_debug_image(f"debug_original_{page_num}.png", pil_216)
-        save_ocr_debug_image(f"debug_processed_{page_num}.png", processed_216)
-        
-        temp_processed_path = f"debug_processed_{page_num}.png"
-        
-        paddle_engine = get_ocr_instance()
-        if paddle_engine and not isinstance(paddle_engine, str):
-            result = paddle_engine.ocr(temp_processed_path)
-            lines_1 = extract_text_lines_from_paddle_result(result)
-            conf_1 = calculate_paddle_confidence(result)
-            
-            if conf_1 == 0.00 and len(lines_1) >= 15:
-                conf_1 = 0.85
-                
-            metrics_1 = score_ocr_attempt(lines_1)
-            score_1 = metrics_1["score"]
-            
-            logger.info(f"Attempt 1 result: {len(lines_1)} lines, conf: {conf_1:.2f}, score: {score_1:.4f}")
-            
-            if score_1 > best_score:
-                best_score = score_1
-                best_lines = lines_1
-                best_conf = conf_1
-                best_meta = {
-                    "engine": "PaddleOCR",
-                    "dpi": 216,
-                    "confidence": conf_1,
-                    "preprocessing_applied": ["grayscale", "auto-deskew", "bilateral_denoise", "clahe", "unsharp_mask"],
-                    "quality_score": score_1,
-                    "lines": len(lines_1)
-                }
-                
-            # Early OOM Protection & stopping check:
-            # Dense pages with high confidence already contain clean text. Continuing to Attempt 2 (300 DPI)
-            # causes massive memory spikes, making CPU servers highly prone to Linux OOM-killer crashes ("Killed").
-            if score_1 >= 0.70 or (conf_1 >= 0.75 and len(lines_1) >= 40):
-                logger.info(
-                    f"Page {page_num}: Attempt 1 was strong (score={score_1:.4f}, lines={len(lines_1)}, conf={conf_1:.2f}). "
-                    f"Stopping early to protect system memory and prevent OOM crash."
-                )
-                page_meta = {
-                    "page": page_num,
-                    "engine": "PaddleOCR",
-                    "dpi": 216,
-                    "confidence": round(conf_1, 3),
-                    "text_length": sum(len(l) for l in lines_1),
-                    "quality_score": score_1,
-                    "preprocessing_applied": ["grayscale", "auto-deskew", "bilateral_denoise", "clahe", "unsharp_mask"],
-                    "lines": len(lines_1)
-                }
-                return lines_1, page_meta
-        else:
-            logger.warning("PaddleOCR engine not available for Attempt 1.")
-    except Exception as e:
-        logger.error(f"Attempt 1 failed: {str(e)}")
-        
-    # --------------------------------------------------
-    # ATTEMPT 2: PaddleOCR at 300 DPI
-    # --------------------------------------------------
-    logger.info(f"Page {page_num}: Running Attempt 2 (PaddleOCR @ 300 DPI)...")
-    try:
-        pil_300 = render_pdf_page_high_dpi(pdf_path, page_idx, scale=scale_300) if pdf_path else page_doc.render(scale=scale_300).to_pil()
-        processed_300 = preprocess_image_premium(pil_300, binarize=False)
-        
-        save_ocr_debug_image(f"debug_processed_300_{page_num}.png", processed_300)
-        temp_processed_path_300 = f"debug_processed_300_{page_num}.png"
-        
-        paddle_engine = get_ocr_instance()
-        if paddle_engine and not isinstance(paddle_engine, str):
-            result = paddle_engine.ocr(temp_processed_path_300)
-            lines_2 = extract_text_lines_from_paddle_result(result)
-            conf_2 = calculate_paddle_confidence(result)
-            
-            if conf_2 == 0.00 and len(lines_2) >= 15:
-                conf_2 = 0.85
-                
-            metrics_2 = score_ocr_attempt(lines_2)
-            score_2 = metrics_2["score"]
-            
-            logger.info(f"Attempt 2 result: {len(lines_2)} lines, conf: {conf_2:.2f}, score: {score_2:.4f}")
-            
-            if score_2 > best_score:
-                best_score = score_2
-                best_lines = lines_2
-                best_conf = conf_2
-                best_meta = {
-                    "engine": "PaddleOCR",
-                    "dpi": 300,
-                    "confidence": conf_2,
-                    "preprocessing_applied": ["grayscale", "auto-deskew", "bilateral_denoise", "clahe", "unsharp_mask_300DPI"],
-                    "quality_score": score_2,
-                    "lines": len(lines_2)
-                }
-                
-            if score_2 >= 0.70:
-                logger.info(f"Attempt 2 was strong (score: {score_2:.4f} >= 0.70). Stopping early.")
-                page_meta = {
-                    "page": page_num,
-                    "engine": "PaddleOCR",
-                    "dpi": 300,
-                    "confidence": round(conf_2, 3),
-                    "text_length": sum(len(l) for l in lines_2),
-                    "quality_score": score_2,
-                    "preprocessing_applied": ["grayscale", "auto-deskew", "bilateral_denoise", "clahe", "unsharp_mask_300DPI"],
-                    "lines": len(lines_2)
-                }
-                return lines_2, page_meta
-        else:
-            logger.warning("PaddleOCR engine not available for Attempt 2.")
-    except Exception as e:
-        logger.error(f"Attempt 2 failed: {str(e)}")
-        
-    # --------------------------------------------------
-    # ATTEMPT 3: Tesseract Fallback
-    # --------------------------------------------------
-    if is_tesseract_available():
-        logger.info(f"Page {page_num}: Running Attempt 3 (Tesseract Fallback)...")
+    # 1. Native Selectable Text Check
+    page_text = ""
+    if pdf_path:
         try:
-            pil_300 = render_pdf_page_high_dpi(pdf_path, page_idx, scale=scale_300) if pdf_path else page_doc.render(scale=scale_300).to_pil()
-            binarized_300 = preprocess_image_premium(pil_300, binarize=True)
-            save_ocr_debug_image(f"debug_processed_binarized_{page_num}.png", binarized_300)
-            
-            lines_3, conf_3 = run_tesseract_fallback(binarized_300)
-            metrics_3 = score_ocr_attempt(lines_3)
-            score_3 = metrics_3["score"]
-            
-            logger.info(f"Attempt 3 result: {len(lines_3)} lines, conf: {conf_3:.2f}, score: {score_3:.4f}")
-            
-            if score_3 > best_score:
-                best_score = score_3
-                best_lines = lines_3
-                best_conf = conf_3
-                best_meta = {
-                    "engine": "Tesseract",
-                    "dpi": 300,
-                    "confidence": conf_3,
-                    "preprocessing_applied": ["grayscale", "auto-deskew", "bilateral_denoise", "clahe", "unsharp_mask", "binarize_otsu_adaptive"],
-                    "quality_score": score_3,
-                    "lines": len(lines_3)
-                }
-                
-            if score_3 >= 0.70:
-                logger.info(f"Attempt 3 was strong (score: {score_3:.4f} >= 0.70). Stopping early.")
-                page_meta = {
-                    "page": page_num,
-                    "engine": "Tesseract",
-                    "dpi": 300,
-                    "confidence": round(conf_3, 3),
-                    "text_length": sum(len(l) for l in lines_3),
-                    "quality_score": score_3,
-                    "preprocessing_applied": ["grayscale", "auto-deskew", "bilateral_denoise", "clahe", "unsharp_mask", "binarize_otsu_adaptive"],
-                    "lines": len(lines_3)
-                }
-                return lines_3, page_meta
-        except Exception as e:
-            logger.error(f"Attempt 3 failed: {str(e)}")
-    else:
-        logger.info(f"Page {page_num}: Skipping Attempt 3 (Tesseract not available).")
-        
-    # --------------------------------------------------
-    # ATTEMPT 4: PyMuPDF Extraction (fitz text)
-    # --------------------------------------------------
-    logger.info(f"Page {page_num}: Running Attempt 4 (PyMuPDF Digital Text Check)...")
-    try:
-        lines_4 = []
-        if pdf_path:
             import fitz
             fitz_doc = fitz.open(pdf_path)
-            page_text = fitz_doc[page_idx].get_text()
-            if page_text:
-                lines_4 = [l.strip() for l in page_text.split("\n") if l.strip()]
-                
-        metrics_4 = score_ocr_attempt(lines_4)
-        score_4 = metrics_4["score"]
-        
-        logger.info(f"Attempt 4 result: {len(lines_4)} lines, score: {score_4:.4f}")
-        
-        if score_4 > best_score:
-            best_score = score_4
-            best_lines = lines_4
-            best_conf = 1.0
-            best_meta = {
-                "engine": "PyMuPDF",
-                "dpi": 72,
-                "confidence": 1.0,
-                "preprocessing_applied": [],
-                "quality_score": score_4,
-                "lines": len(lines_4)
-            }
-            
-        if score_4 >= 0.70:
-            logger.info(f"Attempt 4 was strong (score: {score_4:.4f} >= 0.70). Stopping early.")
+            if page_idx < len(fitz_doc):
+                page_text = fitz_doc[page_idx].get_text()
+        except Exception as e:
+            logger.warning(f"PyMuPDF text extraction failed on page {page_num}: {str(e)}")
+
+    if len(page_text.strip()) > 200:
+        # Verify text quality
+        keywords = ["court", "claimant", "petitioner", "respondent", "accident", "compensation", "tribunal", "judgment", "deceased", "injured"]
+        hits = sum(1 for kw in keywords if kw in page_text.lower())
+        if hits >= 2:
+            logger.info(f"Page {page_num}: TRUST native PyMuPDF text (len={len(page_text)}, keyword_hits={hits}). Bypassing OCR.")
+            lines = [l.strip() for l in page_text.split("\n") if l.strip()]
             page_meta = {
                 "page": page_num,
                 "engine": "PyMuPDF",
                 "dpi": 72,
                 "confidence": 1.0,
-                "text_length": sum(len(l) for l in lines_4),
-                "quality_score": score_4,
+                "text_length": len(page_text),
+                "quality_score": 1.0,
                 "preprocessing_applied": [],
-                "lines": len(lines_4)
+                "lines": len(lines)
             }
-            return lines_4, page_meta
-    except Exception as e:
-        logger.error(f"Attempt 4 failed: {str(e)}")
-        
-    # --------------------------------------------------
-    # ATTEMPT 5: EasyOCR Fallback
-    # --------------------------------------------------
-    logger.info(f"Page {page_num}: Running Attempt 5 (EasyOCR Fallback)...")
+            return lines, page_meta
+
+    # 2. Render Page image at 216 DPI (scale=3.0)
+    pil_img = None
     try:
-        pil_300 = render_pdf_page_high_dpi(pdf_path, page_idx, scale=scale_300) if pdf_path else page_doc.render(scale=scale_300).to_pil()
-        processed_300 = preprocess_image_premium(pil_300, binarize=False)
-        
-        lines_5, conf_5 = run_easyocr_fallback(processed_300)
-        metrics_5 = score_ocr_attempt(lines_5)
-        score_5 = metrics_5["score"]
-        
-        logger.info(f"Attempt 5 result: {len(lines_5)} lines, conf: {conf_5:.2f}, score: {score_5:.4f}")
-        
-        if score_5 > best_score:
-            best_score = score_5
-            best_lines = lines_5
-            best_conf = conf_5
-            best_meta = {
-                "engine": "EasyOCR",
-                "dpi": 300,
-                "confidence": conf_5,
-                "preprocessing_applied": ["grayscale", "auto-deskew", "bilateral_denoise", "clahe", "unsharp_mask_300DPI"],
-                "quality_score": score_5,
-                "lines": len(lines_5)
-            }
+        pil_img = render_pdf_page_high_dpi(pdf_path, page_idx, scale=3.0) if pdf_path else page_doc.render(scale=3.0).to_pil()
     except Exception as e:
-        logger.error(f"Attempt 5 failed: {str(e)}")
-        
-    logger.info(f"--- PAGE {page_num} PIPELINE COMPLETE: Best engine={best_meta['engine']}, Best score={best_score:.4f} ---")
+        logger.error(f"Failed to render page {page_num} at 216 DPI: {str(e)}")
+        return [], {"page": page_num, "engine": "Error", "confidence": 0.0, "lines": 0}
+
+    # 3. Visual Page Classifier (Skip blank scans)
+    classification = classify_scanned_page(pil_img)
+    if classification in ["scanned_blank", "image_only"]:
+        logger.info(f"Page {page_num}: Classified as {classification}. Bypassing OCR entirely.")
+        del pil_img
+        gc.collect()
+        return [], {
+            "page": page_num,
+            "engine": f"Skipped-{classification}",
+            "dpi": 0,
+            "confidence": 1.0,
+            "text_length": 0,
+            "quality_score": 0.0,
+            "preprocessing_applied": [],
+            "lines": 0
+        }
+
+    # 4. Max Page Memory Guard (Downscale Guard)
+    pil_img = guard_and_downscale_image(pil_img)
+
+    # 5. Lightweight Preprocessing
+    processed_img = preprocess_image_light(pil_img, binarize=True)
+    
+    # Debug image conditional writes
+    save_ocr_debug_image(f"debug_original_{page_num}.png", pil_img)
+    save_ocr_debug_image(f"debug_processed_{page_num}.png", processed_img)
+
+    # 6. Single Pass PaddleOCR with Timeout Guard (40 seconds max)
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
+    processed_img.save(temp_file)
+    
+    lines = []
+    conf = 0.0
+    engine_used = "PaddleOCR"
+    dpi_used = 216
+    
+    def run_paddle():
+        engine = get_ocr_instance()
+        if engine:
+            return engine.ocr(temp_file)
+        return None
+
+    try:
+        result, status = run_with_timeout(run_paddle, timeout=40.0)
+        if status == "timeout":
+            logger.warning(f"PaddleOCR timed out on page {page_num} after 40 seconds. Aborting page safely.")
+            result = None
+
+        if result:
+            lines = extract_text_lines_from_paddle_result(result)
+            conf = calculate_paddle_confidence(result)
+            if conf == 0.00 and len(lines) >= 15:
+                conf = 0.85
+    except Exception as e:
+        logger.error(f"PaddleOCR execution failed on page {page_num}: {str(e)}")
+    finally:
+        try:
+            os.unlink(temp_file)
+        except Exception:
+            pass
+
+    # 7. Optional 300 DPI Retry (ONLY if confidence < 0.20 and total pages <= 3)
+    if len(lines) == 0 or (conf < 0.20 and total_pages <= 3):
+        logger.info(f"Page {page_num}: Low confidence/empty. Retrying at 300 DPI (short doc safety).")
+        try:
+            pil_300 = render_pdf_page_high_dpi(pdf_path, page_idx, scale=4.167) if pdf_path else page_doc.render(scale=4.167).to_pil()
+            pil_300 = guard_and_downscale_image(pil_300)
+            processed_300 = preprocess_image_light(pil_300, binarize=True)
+            
+            save_ocr_debug_image(f"debug_processed_300_{page_num}.png", processed_300)
+            temp_file_300 = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
+            processed_300.save(temp_file_300)
+            
+            def run_paddle_300():
+                engine = get_ocr_instance()
+                if engine:
+                    return engine.ocr(temp_file_300)
+                return None
+                
+            result_300, status_300 = run_with_timeout(run_paddle_300, timeout=40.0)
+            if result_300:
+                lines = extract_text_lines_from_paddle_result(result_300)
+                conf = calculate_paddle_confidence(result_300)
+                if conf == 0.00 and len(lines) >= 15:
+                    conf = 0.85
+                dpi_used = 300
+                logger.info(f"300 DPI retry successful: {len(lines)} lines, conf={conf:.2f}")
+            
+            try:
+                os.unlink(temp_file_300)
+            except Exception:
+                pass
+            del pil_300, processed_300
+        except Exception as err300:
+            logger.error(f"300 DPI retry failed: {str(err300)}")
+
+    # 8. Last-resort basic Tesseract fallback
+    if len(lines) == 0 and is_tesseract_available():
+        logger.info(f"Page {page_num}: PaddleOCR returned empty. Running last-resort Tesseract fallback.")
+        try:
+            lines, conf = run_tesseract_fallback(processed_img)
+            engine_used = "Tesseract"
+        except Exception as tess_err:
+            logger.error(f"Tesseract fallback failed: {str(tess_err)}")
+
+    # 9. Strict page-wise memory cleanup
+    del pil_img, processed_img
+    gc.collect()
+    
     page_meta = {
         "page": page_num,
-        "engine": best_meta["engine"],
-        "dpi": best_meta.get("dpi", 300),
-        "confidence": round(best_conf, 3),
-        "text_length": sum(len(l) for l in best_lines),
-        "quality_score": best_score,
-        "preprocessing_applied": best_meta["preprocessing_applied"],
-        "lines": len(best_lines)
+        "engine": engine_used,
+        "dpi": dpi_used,
+        "confidence": round(conf, 3),
+        "text_length": sum(len(l) for l in lines),
+        "quality_score": score_ocr_page_quality(lines),
+        "preprocessing_applied": ["grayscale", "adaptive_threshold", "light_denoise"],
+        "lines": len(lines)
     }
-    return best_lines, page_meta
+    
+    logger.info(f"Page {page_num} completed. lines={len(lines)}, conf={conf:.2f}")
+    return lines, page_meta
+
+
+def perform_ocr_page_with_retry(ocr_engine, page_doc, page_idx: int, total_pages: int, pdf_path: str = None) -> tuple:
+    """Alias for backwards compatibility with scratch scripts."""
+    return perform_ocr_page_stable(ocr_engine, page_doc, page_idx, total_pages, pdf_path)
 
 
 # ======================================================
@@ -1030,14 +692,8 @@ def perform_ocr_page_with_retry(ocr_engine, page_doc, page_idx: int, total_pages
 # ======================================================
 
 def find_relevant_pages_by_keywords(file_path: str, total_pages: int) -> list:
-    """
-    Intelligently searches middle pages (pages 13 to total_pages-8) for
-    compensation-related keywords to prioritize them during scanned PDF OCR.
-    Uses pure Python digital text extraction (PyPDF) and PyMuPDF (fitz) which is extremely fast.
-    """
+    """Searches middle pages for key motor claims keywords to prioritize them in OCR queue."""
     relevant_pages = []
-    
-    # Keywords that strongly indicate claimant facts or compensation math
     comp_keywords = [
         "compensation", "dependency", "multiplier", "consortium", 
         "funeral", "monthly income", "disability", "loss of earning",
@@ -1045,7 +701,6 @@ def find_relevant_pages_by_keywords(file_path: str, total_pages: int) -> list:
         "medical expenses", "pain and suffering"
     ]
     
-    # 1. Try PyPDF extraction first
     try:
         from pypdf import PdfReader
         if total_pages > 12:
@@ -1059,46 +714,26 @@ def find_relevant_pages_by_keywords(file_path: str, total_pages: int) -> list:
                     text_lower = text.lower()
                     if any(kw in text_lower for kw in comp_keywords):
                         relevant_pages.append(page_idx)
-                        logger.info(f"Dynamically added page {page_idx+1} to OCR queue based on PyPDF keyword hits.")
+                        logger.info(f"Dynamically added page {page_idx+1} to OCR queue.")
     except Exception as e:
-        logger.warning(f"PyPDF intelligent page scanning failed: {str(e)}")
+        logger.warning(f"Intelligent page scanning failed: {str(e)}")
         
-    # 2. Try PyMuPDF (fitz) extraction as robust fallback
-    if total_pages > 12:
-        try:
-            import fitz
-            doc = fitz.open(file_path)
-            for page_idx in range(12, total_pages - 8):
-                if page_idx >= len(doc):
-                    break
-                if page_idx in relevant_pages:
-                    continue
-                text = doc[page_idx].get_text()
-                if text:
-                    text_lower = text.lower()
-                    if any(kw in text_lower for kw in comp_keywords):
-                        relevant_pages.append(page_idx)
-                        logger.info(f"Dynamically added page {page_idx+1} to OCR queue based on PyMuPDF keyword hits.")
-        except Exception as e:
-            logger.warning(f"PyMuPDF intelligent page scanning failed: {str(e)}")
-            
     return relevant_pages
 
 
 # ======================================================
-# MAIN SCANNED PDF OCR PIPELINE
+# SCANNED PDF OCR PIPELINE
 # ======================================================
 
 def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_pages: bool = False) -> tuple:
     """
-    Renders pages of a scanned PDF using pypdfium2 and runs the
-    5-stage per-page OCR retry pipeline on each relevant page.
-    Implements fast keyword-based page relevance classification & dynamic page skipping.
+    Sequentially renders and processes relevant pages of a scanned PDF.
+    Excludes procedural or summons pages, processes sequentially with direct memory cleanups.
     """
     ocr_engine = get_ocr_instance()
 
     if ocr_engine is None:
-        logger.warning("PaddleOCR offline. Returning empty result — no fabricated legal data injected.")
+        logger.warning("PaddleOCR offline. Returning empty result.")
         return [], _build_ocr_debug(
             engine_used="unavailable", retry_count=0, quality_score=0.0,
             failed_pages=[], successful_pages=[], preprocessing_applied=[],
@@ -1108,15 +743,14 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
     try:
         doc = pdfium.PdfDocument(file_path)
         total_pages = len(doc)
-        logger.info(f"Scanned PDF '{file_path}' ({total_pages} pages): starting 5-stage OCR retry pipeline (scan_all_pages={scan_all_pages})...")
+        logger.info(f"Scanned PDF '{file_path}' ({total_pages} pages): sequential stable OCR pipeline...")
 
-        # Optimization: for large PDFs (>10 pages), scan first 12 + last 8 only by default
-        # Background indexing scans 100% of the pages to ensure thorough vector DB coverage!
+        # Optimization: scan first 12 + last 8 + dynamically found keyword pages
         if total_pages > 10 and not scan_all_pages:
             base_pages = list(range(12)) + list(range(total_pages - 8, total_pages))
             dynamic_pages = find_relevant_pages_by_keywords(file_path, total_pages)
             pages_to_scan = sorted(set(base_pages + dynamic_pages))
-            logger.info(f"Large PDF detected. Initial scan pages: {[p+1 for p in pages_to_scan]}")
+            logger.info(f"Large PDF detected. Scanning pages: {[p+1 for p in pages_to_scan]}")
         else:
             pages_to_scan = list(range(total_pages))
 
@@ -1128,60 +762,15 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
         page_qualities = []
         page_confidences = []
         fallback_engine_used = ""
-
         page_details = []
         
+        # Process pages strictly sequentially (no multiprocessing, no thread pools)
         for idx, page_idx in enumerate(pages_to_scan):
             page_num = page_idx + 1
             text_lines.append(f"--- PAGE {page_num} ---")
             
-            # Step A: Get quick text using PyMuPDF or a low-res fast Tesseract scan (scale=1.0)
-            quick_text = ""
-            try:
-                import fitz
-                fitz_doc = fitz.open(file_path)
-                quick_text = fitz_doc[page_idx].get_text()
-            except Exception:
-                pass
-                
-            if not quick_text.strip() and is_tesseract_available():
-                try:
-                    low_res_pil = render_pdf_page_high_dpi(file_path, page_idx, scale=1.0)
-                    import pytesseract
-                    quick_text = pytesseract.image_to_string(low_res_pil, lang="eng")
-                except Exception as e:
-                    logger.debug(f"Low-res pre-OCR scan failed on page {page_num}: {str(e)}")
-            
-            # Step B: Classify page type using quick text
-            layout_type = "unknown"
-            relevance = "standard"
-            if quick_text.strip():
-                relevance = classify_page_for_ocr(quick_text)
-                from backend.parser_heuristics import classify_page_type
-                layout_type = classify_page_type(quick_text, page_num)
-                
-            # Step C: Filter & Ignore non-essential pages
-            if relevance.startswith("skip"):
-                logger.info(f"DEBUG PAGE SKIP: page_num={page_num}, why_skipped={relevance}, layout_type={layout_type}")
-                
-                # Mock page details
-                page_details.append({
-                    "page": page_num,
-                    "engine": f"Skipped-{relevance}",
-                    "confidence": 1.0,
-                    "text_length": 0,
-                    "dpi": 0,
-                    "quality_score": 0.0,
-                    "preprocessing_applied": [],
-                    "lines": 0
-                })
-                # Add placeholder skipped lines
-                text_lines.append(f"[Procedural page {page_num} filtered out: {layout_type} ({relevance})]")
-                successful_pages.append(page_num)
-                continue
-
-            # Run 5-stage pipeline
-            page_lines, page_meta = perform_ocr_page_with_retry(
+            # Run stable pipeline on page
+            page_lines, page_meta = perform_ocr_page_stable(
                 ocr_engine, doc[page_idx], page_idx, total_pages, pdf_path=file_path
             )
 
@@ -1192,21 +781,13 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
             page_qualities.append(q)
             page_confidences.append(conf)
 
-            # Fix 8: Comprehensive structured page-by-page debug logging
-            logger.info(
-                f"DEBUG PAGE OCR: page_num={page_num}, engine={engine}, DPI={page_meta.get('dpi', 0)}, "
-                f"lines={page_meta.get('lines', 0)}, confidence={conf:.2f}, "
-                f"preprocessing={page_meta.get('preprocessing_applied', [])}"
-            )
-
-            # Collect page-wise debug metrics
+            logger.info(f"Page {page_num}/{total_pages}: engine={engine}, quality={q:.2f}, lines={len(page_lines)}")
             page_details.append(page_meta)
 
             if engine in ["Tesseract", "EasyOCR"]:
                 total_retry_count += 1
                 fallback_engine_used = engine
 
-            # Collect unique preprocessing steps
             for step in page_meta.get("preprocessing_applied", []):
                 if step not in all_preprocessing_steps:
                     all_preprocessing_steps.append(step)
@@ -1215,10 +796,8 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
                 successful_pages.append(page_num)
             else:
                 failed_pages.append(page_num)
-                logger.warning(f"Page {page_num}: No text extracted across standard and fallback OCR engines.")
 
             text_lines.extend(page_lines)
-            logger.info(f"Page {page_num}/{total_pages}: engine={engine}, quality={q:.4f}, lines={len(page_lines)}")
 
             if progress_callback:
                 progress_callback(int(((idx + 1) / len(pages_to_scan)) * 90))
@@ -1230,7 +809,6 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
             sum(len(l) for l in real_lines) / max(len(real_lines), 1) / 80.0, 3
         ) if real_lines else 0.0
 
-        # Construct final debug dict
         ocr_debug = _build_ocr_debug(
             engine_used="PaddleOCR",
             retry_count=total_retry_count,
@@ -1256,14 +834,11 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
 
 
 def perform_ocr_on_image(file_path: str) -> tuple:
-    """
-    Runs the stabilized OCR pipeline directly on image uploads (PNG, JPG, BMP).
-    Returns: (text_lines: list[str], ocr_debug: dict)
-    """
+    """Runs the stable single-page OCR pipeline directly on uploaded image (PNG, JPG, BMP)."""
     ocr_engine = get_ocr_instance()
 
     if ocr_engine is None:
-        logger.warning("PaddleOCR offline. Returning empty result — no fabricated legal data injected.")
+        logger.warning("PaddleOCR offline. Returning empty result.")
         return [], _build_ocr_debug(
             engine_used="unavailable", retry_count=0, quality_score=0.0,
             failed_pages=[1], successful_pages=[], preprocessing_applied=[],
@@ -1271,131 +846,92 @@ def perform_ocr_on_image(file_path: str) -> tuple:
         )
 
     try:
-        from PIL import Image
         original_pil = Image.open(file_path)
+        logger.info(f"Image upload '{file_path}': starting OCR pipeline...")
         
-        # Run 5-stage pipeline directly on the image
-        logger.info(f"Image upload '{file_path}': starting 5-stage OCR retry pipeline...")
+        # Max Page Memory Guard (Downscale Guard)
+        original_pil = guard_and_downscale_image(original_pil)
         
-        best_lines = []
-        best_conf = 0.0
-        best_score = -1.0
-        best_meta = {
-            "engine": "PaddleOCR",
-            "dpi": 300,
-            "confidence": 0.0,
-            "preprocessing_applied": [],
-            "quality_score": 0.0,
-            "lines": 0
-        }
+        # Lightweight Preprocessing
+        processed_img = preprocess_image_light(original_pil, binarize=True)
         
-        # Save original debug image
         save_ocr_debug_image("debug_original_1.png", original_pil)
+        save_ocr_debug_image("debug_processed_1.png", processed_img)
         
-        # Preprocess 216 DPI (mild CLAHE, light sharpen)
-        processed_216 = preprocess_image_premium(original_pil, binarize=False)
-        save_ocr_debug_image("debug_processed_1.png", processed_216)
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
+        processed_img.save(temp_file)
         
-        # Attempt 1: PaddleOCR
-        try:
-            result = ocr_engine.ocr("debug_processed_1.png")
-            lines_1 = extract_text_lines_from_paddle_result(result)
-            conf_1 = calculate_paddle_confidence(result)
-            if conf_1 == 0.00 and len(lines_1) >= 15:
-                conf_1 = 0.85
-            metrics_1 = score_ocr_attempt(lines_1)
-            score_1 = metrics_1["score"]
-            logger.info(f"Image - Attempt 1 result: {len(lines_1)} lines, conf: {conf_1:.2f}, score: {score_1:.4f}")
-            if score_1 > best_score:
-                best_score = score_1
-                best_lines = lines_1
-                best_conf = conf_1
-                best_meta = {
-                    "engine": "PaddleOCR",
-                    "dpi": 216,
-                    "confidence": conf_1,
-                    "preprocessing_applied": ["grayscale", "auto-deskew", "bilateral_denoise", "clahe", "unsharp_mask"],
-                    "quality_score": score_1,
-                    "lines": len(lines_1)
-                }
-        except Exception as e:
-            logger.error(f"Image - Attempt 1 failed: {str(e)}")
+        lines = []
+        conf = 0.0
+        engine_used = "PaddleOCR"
+        
+        def run_paddle():
+            engine = get_ocr_instance()
+            if engine:
+                return engine.ocr(temp_file)
+            return None
             
-        # Attempt 3 (Tesseract Fallback)
-        if best_score < 0.70 and is_tesseract_available():
-            try:
-                binarized_pil = preprocess_image_premium(original_pil, binarize=True)
-                save_ocr_debug_image("debug_processed_binarized_1.png", binarized_pil)
-                lines_3, conf_3 = run_tesseract_fallback(binarized_pil)
-                metrics_3 = score_ocr_attempt(lines_3)
-                score_3 = metrics_3["score"]
-                logger.info(f"Image - Attempt 3 (Tesseract) result: {len(lines_3)} lines, conf: {conf_3:.2f}, score: {score_3:.4f}")
-                if score_3 > best_score:
-                    best_score = score_3
-                    best_lines = lines_3
-                    best_conf = conf_3
-                    best_meta = {
-                        "engine": "Tesseract",
-                        "dpi": 300,
-                        "confidence": conf_3,
-                        "preprocessing_applied": ["grayscale", "auto-deskew", "bilateral_denoise", "clahe", "unsharp_mask", "binarize_otsu_adaptive"],
-                        "quality_score": score_3,
-                        "lines": len(lines_3)
-                    }
-            except Exception as e:
-                logger.error(f"Image - Attempt 3 failed: {str(e)}")
+        try:
+            result, status = run_with_timeout(run_paddle, timeout=40.0)
+            if status == "timeout":
+                logger.warning("PaddleOCR timed out on image upload.")
+                result = None
                 
-        # Attempt 5 (EasyOCR Fallback)
-        if best_score < 0.70:
+            if result:
+                lines = extract_text_lines_from_paddle_result(result)
+                conf = calculate_paddle_confidence(result)
+                if conf == 0.00 and len(lines) >= 15:
+                    conf = 0.85
+        except Exception as e:
+            logger.error(f"Image PaddleOCR failed: {str(e)}")
+        finally:
             try:
-                lines_5, conf_5 = run_easyocr_fallback(processed_216)
-                metrics_5 = score_ocr_attempt(lines_5)
-                score_5 = metrics_5["score"]
-                logger.info(f"Image - Attempt 5 (EasyOCR) result: {len(lines_5)} lines, conf: {conf_5:.2f}, score: {score_5:.4f}")
-                if score_5 > best_score:
-                    best_score = score_5
-                    best_lines = lines_5
-                    best_conf = conf_5
-                    best_meta = {
-                        "engine": "EasyOCR",
-                        "dpi": 300,
-                        "confidence": conf_5,
-                        "preprocessing_applied": ["grayscale", "auto-deskew", "bilateral_denoise", "clahe", "unsharp_mask"],
-                        "quality_score": score_5,
-                        "lines": len(lines_5)
-                    }
-            except Exception as e:
-                logger.error(f"Image - Attempt 5 failed: {str(e)}")
+                os.unlink(temp_file)
+            except Exception:
+                pass
 
-        failed_pages = [] if best_lines else [1]
-        successful_pages = [1] if best_lines else []
+        # Last-resort Tesseract Fallback
+        if len(lines) == 0 and is_tesseract_available():
+            logger.info("Image PaddleOCR returned empty. Running last-resort Tesseract fallback.")
+            try:
+                lines, conf = run_tesseract_fallback(processed_img)
+                engine_used = "Tesseract"
+            except Exception as e:
+                logger.error(f"Tesseract image fallback failed: {str(e)}")
+
+        # Explicit Memory Cleanup
+        del original_pil, processed_img
+        gc.collect()
+        
+        failed_pages = [] if lines else [1]
+        successful_pages = [1] if lines else []
         
         page_details = [{
             "page": 1,
-            "engine": best_meta["engine"],
-            "dpi": best_meta.get("dpi", 300),
-            "confidence": round(best_conf, 3),
-            "text_length": sum(len(l) for l in best_lines),
-            "quality_score": best_score,
-            "preprocessing_applied": best_meta["preprocessing_applied"],
-            "lines": best_meta["lines"]
+            "engine": engine_used,
+            "dpi": 216,
+            "confidence": round(conf, 3),
+            "text_length": sum(len(l) for l in lines),
+            "quality_score": score_ocr_page_quality(lines),
+            "preprocessing_applied": ["grayscale", "adaptive_threshold", "light_denoise"],
+            "lines": len(lines)
         }]
 
         ocr_debug = _build_ocr_debug(
             engine_used="PaddleOCR",
-            retry_count=1 if best_meta["engine"] in ["Tesseract", "EasyOCR"] else 0,
-            quality_score=best_score,
+            retry_count=1 if engine_used == "Tesseract" else 0,
+            quality_score=score_ocr_page_quality(lines),
             failed_pages=failed_pages,
             successful_pages=successful_pages,
-            preprocessing_applied=best_meta["preprocessing_applied"],
-            fallback_ocr_engine=best_meta["engine"] if best_meta["engine"] != "PaddleOCR" else "",
-            text_density_score=min(len(best_lines) / 30.0, 1.0),
-            average_page_confidence=best_conf,
-            raw_ocr_preview="\n".join(best_lines)[:3000],
+            preprocessing_applied=["grayscale", "adaptive_threshold", "light_denoise"],
+            fallback_ocr_engine=engine_used if engine_used != "PaddleOCR" else "",
+            text_density_score=min(len(lines) / 30.0, 1.0),
+            average_page_confidence=conf,
+            raw_ocr_preview="\n".join(lines)[:3000],
             pages=page_details
         )
 
-        return best_lines, ocr_debug
+        return lines, ocr_debug
 
     except Exception as e:
         logger.error(f"Error running OCR on image: {str(e)}")
@@ -1405,37 +941,30 @@ def perform_ocr_on_image(file_path: str) -> tuple:
 
 
 # ======================================================
-# UTILITIES
+# HEURISTIC UTILITIES & SAFETY GATE
 # ======================================================
 
 def is_extracted_text_sparse(text_lines: list) -> bool:
     """
-    Returns True if extracted text (excluding page markers) has fewer than 15 lines
-    OR if the text is detected as heavily garbled (poor quality digital encoding).
-    Used to decide whether to escalate to the scanned-PDF OCR pipeline.
+    Returns True if extracted text has fewer than 15 lines
+    OR if the text is detected as heavily garbled (poor quality digital layers).
     """
     actual = [l for l in text_lines if not l.strip().startswith("--- PAGE")]
     if len(actual) < 15:
         return True
 
-    # Quality check for garbled digital text layers (highly scrambled/corrupted font encodings):
     full_text = " ".join(actual).lower()
-    
-    # 1. Check legal keyword hits in the text
     legal_keywords = ["tribunal", "claimant", "petitioner", "accident", "compensation", "deceased", "injured", "insurance", "award", "judgment"]
     kw_hits = sum(1 for kw in legal_keywords if kw in full_text)
     
-    # 2. Check symbol density and word quality
     words = [w for w in full_text.split() if w]
     if not words:
         return True
         
     avg_word_len = sum(len(w) for w in words) / len(words)
-    # High proportion of long unspaced words with multiple special characters indicates a corrupted text layer
     gibberish_words = sum(1 for w in words if len(w) > 15 or any(c in w for c in '@#$[]{}|'))
     gibberish_ratio = gibberish_words / len(words)
     
-    # If the text has very few legal keywords despite being long, OR high gibberish ratio, OR extreme word length, flag as poor quality
     is_poor_quality = (
         (kw_hits < 3 and len(actual) > 50) or
         (gibberish_ratio > 0.05) or
@@ -1444,8 +973,7 @@ def is_extracted_text_sparse(text_lines: list) -> bool:
     )
     if is_poor_quality:
         logger.info(
-            f"Digital text quality check: detected garbled text layer (kw_hits={kw_hits}, "
-            f"gibberish_ratio={gibberish_ratio:.2f}, avg_word_len={avg_word_len:.1f}). Escalate to OCR fallback."
+            f"Digital text layer poor quality (hits={kw_hits}, gibberish_ratio={gibberish_ratio:.2f}, len={avg_word_len:.1f}). Triggering OCR fallback."
         )
         return True
         
@@ -1453,11 +981,7 @@ def is_extracted_text_sparse(text_lines: list) -> bool:
 
 
 def extract_award_amount_from_text(text_lines: list) -> float:
-    """
-    Extracts an explicit tribunal award amount from raw OCR text lines.
-    Returns 0.0 if no clear amount is found.
-    LEGAL SAFETY: Only returns amounts found in actual OCR text, skipping exaggeration claims.
-    """
+    """Extracts explicit tribunal award amount, bypassing advocate or claimant claims."""
     award_patterns = [
         r'(?:total|final|award|awarded|amount|sum\s+of|compensation\s+of)\b[^0-9]{0,50}?(?:rs\.?|inr|rupees)?\s*([\d,]{5,10})\b',
         r'\b(?:rs\.?|inr)\s*([\d,]{5,10})\b[^0-9]{0,50}?(?:with\s*interest|is\s*awarded|as\s*compensation|towards)'
@@ -1469,12 +993,11 @@ def extract_award_amount_from_text(text_lines: list) -> float:
             val_str = match.group(1)
             val = float(re.sub(r'[^\d]', '', val_str))
             
-            # Check context window before the match to see if it's a claim/demand
+            # Context window exclusion (skips claim demands)
             start_pos = max(0, match.start() - 60)
             pre_ctx = full_text_lower[start_pos:match.start()]
             
             if any(kw in pre_ctx for kw in ["claim", "claiming", "sought", "demand", "demanded", "prayed", "prayer", "valuation"]):
-                # Proximity override: if a positive keyword is closer to the match than the negative keyword, do not skip
                 neg_pos = -1
                 for kw in ["claim", "claiming", "sought", "demand", "demanded", "prayed", "prayer", "valuation"]:
                     idx = pre_ctx.rfind(kw)
@@ -1488,13 +1011,11 @@ def extract_award_amount_from_text(text_lines: list) -> float:
                         pos_pos = idx
                         
                 if neg_pos > pos_pos:
-                    logger.info(f"Skipping claimed amount Rs. {val:,.0f} from award candidate list due to claim context: '{pre_ctx.strip()}'")
                     continue
                 
             candidates.append(val)
             
         if candidates:
-            # Exclude low values under 5000 (which are court fees/diet), and return the first valid candidate
             valid_candidates = [c for c in candidates if c >= 5000]
             if valid_candidates:
                 return valid_candidates[0]
@@ -1502,27 +1023,13 @@ def extract_award_amount_from_text(text_lines: list) -> float:
     return 0.0
 
 
-# ======================================================
-# OCR QUALITY GATE
-# ======================================================
-
 def apply_ocr_quality_gate(suggestions: dict, ocr_debug: dict) -> dict:
-    """
-    Legal Safety Gate: If OCR quality score is below the minimum threshold,
-    we activate partial extraction recovery mode instead of blanking the fields.
-    Low-confidence fields remain available for autofill but are marked inside suggestions.
-    """
+    """Quality safety check to raise warnings if quality score is extremely low."""
     quality = ocr_debug.get("ocr_quality_score", 1.0)
     suggestions["ocr_quality_insufficient"] = quality < OCR_QUALITY_GATE_THRESHOLD
 
     if quality < OCR_QUALITY_GATE_THRESHOLD:
-        logger.warning(
-            f"OCR quality {quality:.2f} below legal safety threshold {OCR_QUALITY_GATE_THRESHOLD}. "
-            "Activating partial extraction recovery mode."
-        )
-        suggestions["ocr_warning"] = (
-            f"OCR confidence low (score: {quality:.2f}). Running in partial extraction recovery mode."
-        )
+        suggestions["ocr_warning"] = f"OCR quality low (score: {quality:.2f}). Running in partial recovery mode."
         suggestions["partial_extraction_recovery_mode"] = True
 
     return suggestions
@@ -1533,23 +1040,19 @@ def apply_ocr_quality_gate(suggestions: dict, ocr_debug: dict) -> dict:
 # ======================================================
 
 def run_background_pdf_indexing(file_id: str, temp_path: str, filename: str):
-    """
-    Background worker: dual-mode PDF text extraction → 4-layer OCR retry
-    → legal heuristics parsing → OCR quality gate → Qdrant vector indexing.
-    """
+    """Background worker indexing PDFs sequentially into Qdrant."""
     try:
         BATCH_QUEUE[file_id]["status"] = "scanning"
         BATCH_QUEUE[file_id]["progress"] = 20
 
-        # 1. Attempt digital selectable text extraction (fastest path)
-        logger.info(f"Background task: Extracting selectable text from '{filename}'")
+        # 1. Selectable text extraction
         text_lines = extract_digital_pdf_text(temp_path)
         fallback_source = "DigitalPDF"
         ocr_debug = _build_ocr_debug("DigitalPDF", 0, 1.0, [], [], [], "", 0.0)
 
-        # 2. Sparse → 4-layer OCR retry pipeline (scan_all_pages=True for complete vector DB index)
+        # 2. Scanned OCR Escalation (scan_all_pages=True for comprehensive index)
         if is_extracted_text_sparse(text_lines):
-            logger.info(f"Selectable text sparse. Running 4-layer OCR pipeline for '{filename}'")
+            logger.info(f"Selectable text sparse. Running sequential stable OCR for {filename}")
 
             def report_progress(prog_percent):
                 BATCH_QUEUE[file_id]["progress"] = prog_percent
@@ -1559,9 +1062,8 @@ def run_background_pdf_indexing(file_id: str, temp_path: str, filename: str):
             )
             fallback_source = "PaddleOCR"
 
-        # 3. Still sparse → alternate layout extraction (PyMuPDF / pdfplumber)
+        # 3. Alternate Layout fallback
         if is_extracted_text_sparse(text_lines):
-            logger.info("OCR pipeline sparse. Trying alternate layout extraction (PyMuPDF/pdfplumber)...")
             alt_lines = extract_alternate_pdf_text(temp_path)
             if len(alt_lines) > len(text_lines):
                 text_lines = alt_lines
@@ -1571,24 +1073,20 @@ def run_background_pdf_indexing(file_id: str, temp_path: str, filename: str):
 
         BATCH_QUEUE[file_id]["progress"] = 90
 
-        # 4. Parse with legal heuristics
-        logger.info(f"Parsing extracted text for '{filename}'")
+        # Heuristic parsing
         suggestions = parse_extracted_text(text_lines)
-
-        # 5. OCR Quality Gate — disable reconstruction if quality is insufficient
         suggestions = apply_ocr_quality_gate(suggestions, ocr_debug)
 
         if suggestions.get("ai_recovery_triggered", False):
             fallback_source = "RealTextRecovery"
         suggestions["fallback_source_used"] = fallback_source
 
-        # 6. Extract explicit judicial award amount
+        # Extract true judicial award
         award_amount = extract_award_amount_from_text(text_lines)
         if award_amount > 0:
             suggestions["award_amount"] = award_amount
             suggestions["total_compensation"] = award_amount
             
-            # Recalculate notional monthly income with the true award amount
             from backend.parser_heuristics import deduce_notional_income
             age = suggestions.get("age") or 30
             marital_status = suggestions.get("marital_status") or "married"
@@ -1599,18 +1097,13 @@ def run_background_pdf_indexing(file_id: str, temp_path: str, filename: str):
             suggestions["monthly_income"] = deduce_notional_income(
                 award_amount, age, marital_status, dependents, future_prospect, multiplier
             )
-            logger.info(f"Judicial award amount parsed: Rs. {award_amount:,.0f}, recalculated monthly income: Rs. {suggestions['monthly_income']:,.2f}")
 
-        # 7. Index into Qdrant vector DB
         BATCH_QUEUE[file_id]["status"] = "indexing"
-        logger.info(f"Indexing '{filename}' in Qdrant...")
         success = index_document(filename, text_lines, suggestions)
 
-        # Format suggestions into strict nested calculator format for frontend queue consumption
         from backend.parser_heuristics import format_suggestions_for_calculator
         formatted_suggestions = format_suggestions_for_calculator(suggestions)
 
-        # 8. Cleanup
         if os.path.exists(temp_path):
             os.unlink(temp_path)
 
@@ -1620,30 +1113,25 @@ def run_background_pdf_indexing(file_id: str, temp_path: str, filename: str):
             BATCH_QUEUE[file_id]["suggestions"] = formatted_suggestions
             BATCH_QUEUE[file_id]["raw_text"] = text_lines
             BATCH_QUEUE[file_id]["ocr_debug"] = ocr_debug
-            logger.info(f"Background task: '{filename}' indexed successfully!")
         else:
             BATCH_QUEUE[file_id]["status"] = "failed"
-            BATCH_QUEUE[file_id]["error"] = "Qdrant indexing upsert failed."
-            logger.error(f"Background task: Indexing failed for '{filename}'")
+            BATCH_QUEUE[file_id]["error"] = "Indexing insertion failed."
 
     except Exception as e:
         if os.path.exists(temp_path):
             os.unlink(temp_path)
         BATCH_QUEUE[file_id]["status"] = "failed"
         BATCH_QUEUE[file_id]["error"] = str(e)
-        logger.error(f"Background task exception for '{filename}': {str(e)}")
+        logger.error(f"Background task failed for {filename}: {str(e)}")
 
 
 # ======================================================
-# API ROUTERS
+# API ENDPOINTS
 # ======================================================
 
 @router.post("/process-ocr")
 async def process_single_file(file: UploadFile = File(...)):
-    """
-    Synchronous single image/PDF upload — instant OCR + legal heuristics parsing.
-    Response includes ocr_debug metadata block with quality score and retry info.
-    """
+    """Synchronous single file handler implementing identical frontend contracts."""
     file_ext = os.path.splitext(file.filename)[1].lower()
     allowed_images = {".png", ".jpg", ".jpeg", ".bmp"}
     allowed_docs = {".pdf"}
@@ -1651,7 +1139,7 @@ async def process_single_file(file: UploadFile = File(...)):
     if file_ext not in allowed_images and file_ext not in allowed_docs:
         raise HTTPException(
             status_code=400,
-            detail="Only standard images (PNG, JPG, BMP) and PDFs are supported."
+            detail="Only PNG, JPG, BMP and PDF formats are supported."
         )
 
     try:
@@ -1659,25 +1147,23 @@ async def process_single_file(file: UploadFile = File(...)):
             shutil.copyfileobj(file.file, tmp)
             temp_path = tmp.name
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save upload: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Saving upload failed: {str(e)}")
 
     try:
         fallback_source = "DigitalPDF"
         ocr_debug = _build_ocr_debug("DigitalPDF", 0, 1.0, [], [], [], "", 0.0)
 
         if file_ext == ".pdf":
-            # 1. Try selectable digital text (fastest)
+            # 1. Digitalselectable check
             text_lines = extract_digital_pdf_text(temp_path)
 
-            # 2. Sparse → 4-layer OCR retry pipeline
+            # 2. OCR retry escalation
             if is_extracted_text_sparse(text_lines):
-                logger.info("Selectable PDF text sparse. Running 4-layer OCR pipeline...")
                 text_lines, ocr_debug = perform_ocr_on_scanned_pdf(temp_path)
                 fallback_source = "PaddleOCR"
 
-            # 3. Still sparse → alternate layout extraction
+            # 3. Alternate Layout fallback
             if is_extracted_text_sparse(text_lines):
-                logger.info("OCR output sparse. Running alternate layout extraction...")
                 alt_lines = extract_alternate_pdf_text(temp_path)
                 if len(alt_lines) > len(text_lines):
                     text_lines = alt_lines
@@ -1685,27 +1171,21 @@ async def process_single_file(file: UploadFile = File(...)):
                     ocr_debug["fallback_ocr_engine"] = "PyMuPDF/pdfplumber"
                     ocr_debug["ocr_quality_score"] = 1.0
         else:
-            # Image upload — 4-layer retry
             text_lines, ocr_debug = perform_ocr_on_image(temp_path)
             fallback_source = "PaddleOCR"
 
-        # Legal heuristics parsing
         suggestions = parse_extracted_text(text_lines)
-
-        # OCR Quality Gate
         suggestions = apply_ocr_quality_gate(suggestions, ocr_debug)
 
         if suggestions.get("ai_recovery_triggered", False):
             fallback_source = "RealTextRecovery"
         suggestions["fallback_source_used"] = fallback_source
 
-        # Extract judicial award amount
         award_amount = extract_award_amount_from_text(text_lines)
         if award_amount > 0:
             suggestions["award_amount"] = award_amount
             suggestions["total_compensation"] = award_amount
             
-            # Recalculate notional monthly income with the true award amount
             from backend.parser_heuristics import deduce_notional_income
             age = suggestions.get("age") or 30
             marital_status = suggestions.get("marital_status") or "married"
@@ -1717,7 +1197,6 @@ async def process_single_file(file: UploadFile = File(...)):
                 award_amount, age, marital_status, dependents, future_prospect, multiplier
             )
 
-        # Format suggestions into strict nested calculator format
         from backend.parser_heuristics import format_suggestions_for_calculator
         formatted_suggestions = format_suggestions_for_calculator(suggestions)
 
@@ -1740,9 +1219,7 @@ async def process_single_file(file: UploadFile = File(...)):
 
 @router.post("/upload-batch")
 async def upload_batch_pdfs(files: list[UploadFile] = File(...), background_tasks: BackgroundTasks = None):
-    """
-    Batch PDF upload — queues 1–100+ PDFs for background 4-layer OCR + Qdrant indexing.
-    """
+    """Batch PDF upload for background sequential OCR indexing."""
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
 
@@ -1792,7 +1269,7 @@ async def upload_batch_pdfs(files: list[UploadFile] = File(...), background_task
 
 @router.get("/batch-status")
 async def get_batch_status():
-    """Returns real-time processing states of all PDFs in the batch queue."""
+    """Returns batch processing queue status updates."""
     return {
         "success": True,
         "queue": list(BATCH_QUEUE.values()),
