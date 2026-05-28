@@ -212,6 +212,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     labelDeps.innerHTML = "Number of Dependents";
                 }
                 if (dependentsInput) dependentsInput.removeAttribute("required");
+                
+                const futureProspectInput = document.getElementById("future-prospect");
+                if (futureProspectInput) futureProspectInput.removeAttribute("required");
             } else if (caseType === "death") {
                 deathFields.classList.remove("hidden-section");
                 deathFields.classList.add("show");
@@ -224,6 +227,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     labelDeps.innerHTML = "Number of Dependents <span class=\"req\">*</span>";
                 }
                 if (dependentsInput) dependentsInput.setAttribute("required", "required");
+                
+                const futureProspectInput = document.getElementById("future-prospect");
+                if (futureProspectInput) futureProspectInput.setAttribute("required", "required");
             }
             
             formActionsBar.classList.remove("hidden-section");
@@ -1451,6 +1457,7 @@ document.addEventListener("DOMContentLoaded", () => {
         console.log("CALCULATE BUTTON FOUND");
         calculateBtn.addEventListener("click", (e) => {
             console.log("CALCULATE CLICKED");
+            compensationForm.dispatchEvent(new Event("submit"));
         });
     }
 
