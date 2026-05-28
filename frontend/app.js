@@ -425,10 +425,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 // Dynamic live calculations
                 const monthlyIncome = parseFloat(monthlyIncomeInput.value) || 0;
-                const annualIncome = monthlyIncome * 12;
-                const futureIncome = annualIncome + (annualIncome * prospects / 100);
-                const deductionAmount = futureIncome * deductionRatio;
-                const dependencyIncome = futureIncome - deductionAmount;
+                const futureProspectAmount = monthlyIncome * prospects / 100;
+                const enhancedMonthlyIncome = monthlyIncome + futureProspectAmount;
+                const annualIncome = enhancedMonthlyIncome * 12;
+                const deductionAmount = annualIncome * deductionRatio;
+                const dependencyIncome = annualIncome - deductionAmount;
                 const lossOfDependency = dependencyIncome * mult;
 
                 const consortium = parseFloat(document.getElementById("consortium")?.value) || 40000;
@@ -446,7 +447,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 // Populate dynamic dashboard elements
                 if (document.getElementById("live-calc-annual")) {
                     document.getElementById("live-calc-annual").textContent = formatCurrency(annualIncome);
-                    document.getElementById("live-calc-future").textContent = formatCurrency(futureIncome);
+                    document.getElementById("live-calc-future").textContent = formatCurrency(enhancedMonthlyIncome);
                     document.getElementById("live-calc-deduct-pct").textContent = `${deductionsPercent}%`;
                     document.getElementById("live-calc-deduct-amt").textContent = formatCurrency(deductionAmount);
                     document.getElementById("live-calc-multiplier").textContent = mult;
@@ -1230,12 +1231,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (data.case_type === "death") {
             const futureProspect = getFutureProspectPercentage(age, data.future_type);
-            const annualIncome = monthly * 12;
-            const futureIncome = annualIncome + (annualIncome * futureProspect / 100);
+            const futureProspectAmount = monthly * futureProspect / 100;
+            const enhancedMonthlyIncome = monthly + futureProspectAmount;
+            const annualIncome = enhancedMonthlyIncome * 12;
             const deductionRatio = getDeductionRatio(data.dependents, data.marital_status);
             const deductionPercent = Math.round(deductionRatio * 100);
-            const deductionAmount = futureIncome * deductionRatio;
-            const dependencyIncome = futureIncome - deductionAmount;
+            const deductionAmount = annualIncome * deductionRatio;
+            const dependencyIncome = annualIncome - deductionAmount;
             const lossOfDependency = dependencyIncome * multiplier;
             const finalCompensation = lossOfDependency + data.consortium + data.funeral_expenses + data.loss_estate;
 
@@ -1243,10 +1245,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 case_type: "death",
                 multiplier: multiplier,
                 future_prospect_percentage: Math.round(futureProspect),
-                future_percentage: Math.round(futureProspect),
+                future_prospect_amount: Math.round(futureProspectAmount),
+                enhanced_monthly_income: Math.round(enhancedMonthlyIncome),
                 monthly_income: Math.round(monthly),
                 annual_income: Math.round(annualIncome),
-                future_income: Math.round(futureIncome),
+                future_income: Math.round(annualIncome), // for backwards compatibility
                 deduction_percentage: Math.round(deductionPercent),
                 deduction_amount: Math.round(deductionAmount),
                 dependency_income: Math.round(dependencyIncome),
@@ -1304,22 +1307,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
         let parametersHtml = "";
         if (res.case_type === "death") {
-            const futureProspectPercent = res.future_prospect_percentage !== undefined ? res.future_prospect_percentage : (res.future_percentage || 0);
-            const futureIncomeVal = res.future_income !== undefined ? res.future_income : (req.monthly_income * 12 * (1 + futureProspectPercent / 100));
-            const annualIncomeVal = res.annual_income !== undefined ? res.annual_income : (req.monthly_income * 12);
+            const futureProspectPercent = res.future_prospect_percentage !== undefined ? res.future_prospect_percentage : 0;
+            const monthlyIncomeVal = res.monthly_income !== undefined ? res.monthly_income : req.monthly_income;
+            const enhancedMonthlyIncomeVal = res.enhanced_monthly_income !== undefined ? res.enhanced_monthly_income : (monthlyIncomeVal * (1 + futureProspectPercent / 100));
+            const annualIncomeVal = res.annual_income !== undefined ? res.annual_income : (enhancedMonthlyIncomeVal * 12);
             
             parametersHtml = `
                 <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
-                    <span>Annual Income</span>
-                    <strong>${formatCurrency(annualIncomeVal)}</strong>
+                    <span>Monthly Income</span>
+                    <strong>${formatCurrency(monthlyIncomeVal)}</strong>
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
-                    <span>Future Prospect Added</span>
-                    <strong>+${futureProspectPercent}% (${formatCurrency(futureIncomeVal - annualIncomeVal)})</strong>
+                    <span>Future Prospects Added</span>
+                    <strong>+${futureProspectPercent}%</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Enhanced Monthly Income</span>
+                    <strong>${formatCurrency(enhancedMonthlyIncomeVal)}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Annual Income (Enhanced)</span>
+                    <strong>${formatCurrency(annualIncomeVal)}</strong>
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
                     <span>Deduction Applied</span>
                     <strong>${res.deduction_percentage}% (-${formatCurrency(res.deduction_amount)})</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Dependency Income</span>
+                    <strong>${formatCurrency(res.dependency_income)}</strong>
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
                     <span>Multiplier Used</span>

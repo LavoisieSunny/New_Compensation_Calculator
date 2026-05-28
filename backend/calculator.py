@@ -276,14 +276,15 @@ def calculate_death_compensation(
     future_percent = get_future_prospect(age, future_type)
     future_prospect_percentage = round(future_percent * 100)
 
-    annual_income = monthly_income * 12
-    future_income = annual_income + (annual_income * future_prospect_percentage / 100)
+    future_prospect_amount = monthly_income * future_prospect_percentage / 100.0
+    enhanced_monthly_income = monthly_income + future_prospect_amount
+    annual_income = enhanced_monthly_income * 12.0
 
     deduction_ratio = get_deduction(dependents, marital_status)
     deduction_percentage = round(deduction_ratio * 100)
-    deduction_amount = future_income * deduction_ratio
+    deduction_amount = annual_income * deduction_ratio
 
-    dependency_income = future_income - deduction_amount
+    dependency_income = annual_income - deduction_amount
     loss_of_dependency = dependency_income * multiplier
 
     # Conventional heads with safe_float
@@ -300,9 +301,12 @@ def calculate_death_compensation(
 
     return {
         "case_type": "death",
-        "annual_income": round(annual_income),
-        "future_income": round(future_income),
+        "monthly_income": round(monthly_income),
         "future_prospect_percentage": future_prospect_percentage,
+        "future_prospect_amount": round(future_prospect_amount),
+        "enhanced_monthly_income": round(enhanced_monthly_income),
+        "annual_income": round(annual_income),
+        "future_income": round(annual_income),  # for backwards compatibility
         "deduction_percentage": deduction_percentage,
         "deduction_amount": round(deduction_amount),
         "dependency_income": round(dependency_income),
@@ -314,6 +318,7 @@ def calculate_death_compensation(
         "final_compensation": round(final_compensation),
         "final_amount": round(final_compensation)
     }
+
 
 
 
