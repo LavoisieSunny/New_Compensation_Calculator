@@ -26,7 +26,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const pulseIndicator = document.querySelector(".pulse-indicator");
     
     // TAB 1: CALCULATOR WORKSPACE
-    const caseTypeSelect = document.getElementById("case_type");
+    const caseTypeSelect = document.getElementById("case-type");
     const sharedFields = document.getElementById("shared-fields");
     const deathFields = document.getElementById("death-fields");
     const injuryFields = document.getElementById("injury-fields");
@@ -42,8 +42,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const singlePreviewFilename = document.getElementById("single-preview-filename");
     
     // Age & Dates
-    const dobInput = document.getElementById("date_of_birth");
-    const doaInput = document.getElementById("date_of_accident");
+    const dobInput = document.getElementById("date-of-birth");
+    const doaInput = document.getElementById("date-of-accident");
     const ageInput = document.getElementById("age");
     
     // Live previews
@@ -59,9 +59,9 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // Extra elements
     const dependentsInput = document.getElementById("dependents");
-    const maritalStatusSelect = document.getElementById("marital_status");
-    const futureTypeSelect = document.getElementById("future_type");
-    const monthlyIncomeInput = document.getElementById("monthly_income");
+    const maritalStatusSelect = document.getElementById("marital-status");
+    const futureTypeSelect = document.getElementById("future-type");
+    const monthlyIncomeInput = document.getElementById("monthly-income");
     
     // Precedents benchmarking
     const evaluatorCard = document.getElementById("evaluator-card");
@@ -291,9 +291,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (dependents === null || dependents === undefined) return 50;
         if (status.toLowerCase() === "single") return 50;
         if (dependents <= 1) return 50;
-        if (dependents <= 3) return Math.round((1 / 3) * 100);
-        if (dependents <= 6) return 25;
-        return 20;
+        if (dependents <= 3) return 33;
+        return 25;
     }
 
     function updateLiveCalculations() {
@@ -755,21 +754,21 @@ document.addEventListener("DOMContentLoaded", () => {
         const fieldMapping = {
             "deceased_name": "name",
             "injured_name": "name",
-            "father_name": "father_name",
-            "place_of_accident": "place_of_accident",
+            "father_name": "father-name",
+            "place_of_accident": "place-of-accident",
             "age": "age",
-            "monthly_income": "monthly_income",
+            "monthly_income": "monthly-income",
             "dependents": "dependents",
-            "marital_status": "marital_status",
-            "future_prospect": "future_prospect",
+            "marital_status": "marital-status",
+            "future_prospect": "future-prospect",
             "disability": "disability",
-            "medical_expenses": "medical_expenses",
-            "future_medical_expenses": "future_medical_expenses",
-            "pain_and_suffering": "pain_and_suffering",
+            "medical_expenses": "medical-expenses",
+            "future_medical_expenses": "future-medical-expenses",
+            "pain_and_suffering": "pain-and-suffering",
             "transportation": "transportation",
-            "special_diet": "special_diet",
-            "attender_charges": "attender_charges",
-            "loss_of_income": "loss_of_income"
+            "special_diet": "special-diet",
+            "attender_charges": "attender-charges",
+            "loss_of_income": "loss-of-income"
         };
 
         // Populate form inputs
@@ -1064,13 +1063,13 @@ document.addEventListener("DOMContentLoaded", () => {
             consis: 0,
             
             disability: Number(document.getElementById("disability")?.value || 0),
-            medical_expenses: Number(document.getElementById("medical_expenses")?.value || 0),
-            future_medical_expenses: Number(document.getElementById("future_medical_expenses")?.value || 0),
-            pain_and_suffering: Number(document.getElementById("pain_and_suffering")?.value || 0),
+            medical_expenses: Number(document.getElementById("medical-expenses")?.value || 0),
+            future_medical_expenses: Number(document.getElementById("future-medical-expenses")?.value || 0),
+            pain_and_suffering: Number(document.getElementById("pain-and-suffering")?.value || 0),
             transportation: Number(document.getElementById("transportation")?.value || 0),
-            special_diet: Number(document.getElementById("special_diet")?.value || 0),
-            attender_charges: Number(document.getElementById("attender_charges")?.value || 0),
-            loss_of_income: Number(document.getElementById("loss_of_income")?.value || 0),
+            special_diet: Number(document.getElementById("special-diet")?.value || 0),
+            attender_charges: Number(document.getElementById("attender-charges")?.value || 0),
+            loss_of_income: Number(document.getElementById("loss-of-income")?.value || 0),
 
             // Extra Injury heads
             coliti: 0,
@@ -1119,52 +1118,49 @@ document.addEventListener("DOMContentLoaded", () => {
         const annual = monthly * 12;
 
         if (data.case_type === "death") {
-            const prospectPercent = getFutureProspectPercentage(age, data.future_type) / 100;
-            const enhancedMonthly = monthly + (monthly * prospectPercent);
-            const enhancedAnnual = enhancedMonthly * 12;
-            const deductionPercent = getDeductionPercentage(data.dependents, data.marital_status) / 100;
-            const familyContribution = enhancedAnnual * (1 - deductionPercent);
-            const lossDependency = familyContribution * multiplier;
-            const finalAmount = lossDependency + data.consortium + data.funeral_expenses + data.loss_estate +
-                (data.conlum || 0) + (data.conspo || 0) + (data.conpar || 0) + (data.conchil || 0) + (data.conwif || 0) +
-                (data.conmo || 0) + (data.confath || 0) + (data.conhus || 0) + (data.conbro || 0) + (data.consis || 0);
+            const futureProspect = getFutureProspectPercentage(age, data.future_type);
+            const enhancedIncome = monthly + (monthly * futureProspect / 100);
+            const annualIncome = enhancedIncome * 12;
+            const dependencyLoss = annualIncome * multiplier;
+            const deductionPercent = getDeductionPercentage(data.dependents, data.marital_status);
+            const deductionVal = dependencyLoss * (deductionPercent / 100);
+            const finalDependency = dependencyLoss - deductionVal;
+            const finalCompensation = finalDependency + data.consortium + data.funeral_expenses + data.loss_estate;
 
             return {
                 case_type: "death",
                 multiplier: multiplier,
-                future_percentage: Math.round(prospectPercent * 100),
-                enhanced_monthly_income: Math.round(enhancedMonthly),
-                annual_income: Math.round(enhancedAnnual),
-                deduction_percentage: Math.round(deductionPercent * 100),
-                family_contribution: Math.round(familyContribution),
-                loss_dependency: Math.round(lossDependency),
+                future_percentage: Math.round(futureProspect),
+                enhanced_monthly_income: Math.round(enhancedIncome),
+                annual_income: Math.round(annualIncome),
+                deduction_percentage: Math.round(deductionPercent),
+                family_contribution: Math.round(annualIncome * (1 - deductionPercent / 100)),
+                loss_dependency: Math.round(dependencyLoss),
                 consortium: data.consortium,
                 funeral_expenses: data.funeral_expenses,
                 loss_estate: data.loss_estate,
-                conlum: data.conlum || 0,
-                conspo: data.conspo || 0,
-                conpar: data.conpar || 0,
-                conchil: data.conchil || 0,
-                conwif: data.conwif || 0,
-                conmo: data.conmo || 0,
-                confath: data.confath || 0,
-                conhus: data.conhus || 0,
-                conbro: data.conbro || 0,
-                consis: data.consis || 0,
-                final_amount: Math.round(finalAmount)
+                conlum: 0,
+                conspo: 0,
+                conpar: 0,
+                conchil: 0,
+                conwif: 0,
+                conmo: 0,
+                confath: 0,
+                conhus: 0,
+                conbro: 0,
+                consis: 0,
+                final_amount: Math.round(finalCompensation)
             };
         } else {
-            const futureLoss = annual * (data.disability / 100) * multiplier;
-            const finalAmount = futureLoss + data.medical_expenses + data.future_medical_expenses + 
-                data.pain_and_suffering + data.transportation + data.special_diet + data.attender_charges + data.loss_of_income +
-                (data.coliti || 0) + (data.misex || 0) + (data.loamiti || 0) + (data.lopmarri || 0) + (data.loexlife || 0) + 
-                (data.loveaff || 0) + (data.lossofenjoy || 0);
+            const disabilityCompensation = annual * (data.disability / 100) * multiplier;
+            const finalCompensation = disabilityCompensation + data.medical_expenses + data.future_medical_expenses + 
+                data.pain_and_suffering + data.transportation + data.special_diet + data.attender_charges + data.loss_of_income;
             
             return {
                 case_type: "injury",
                 multiplier: multiplier,
                 annual_income: Math.round(annual),
-                future_income_loss: Math.round(futureLoss),
+                future_income_loss: Math.round(disabilityCompensation),
                 medical_expenses: data.medical_expenses,
                 future_medical_expenses: data.future_medical_expenses,
                 pain_and_suffering: data.pain_and_suffering,
@@ -1172,14 +1168,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 special_diet: data.special_diet,
                 attender_charges: data.attender_charges,
                 loss_of_income: data.loss_of_income,
-                coliti: data.coliti || 0,
-                misex: data.misex || 0,
-                loamiti: data.loamiti || 0,
-                lopmarri: data.lopmarri || 0,
-                loexlife: data.loexlife || 0,
-                loveaff: data.loveaff || 0,
-                lossofenjoy: data.lossofenjoy || 0,
-                final_amount: Math.round(finalAmount)
+                coliti: 0,
+                misex: 0,
+                loamiti: 0,
+                lopmarri: 0,
+                loexlife: 0,
+                loveaff: 0,
+                lossofenjoy: 0,
+                final_amount: Math.round(finalCompensation)
             };
         }
     }
@@ -1285,6 +1281,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 </div>
             </div>
         `;
+
+        const finalCompEl = document.getElementById("final-compensation");
+        if (finalCompEl) {
+            finalCompEl.innerText = `₹ ${res.final_amount.toLocaleString("en-IN")}`;
+        }
     }
 
     // Modal controls
@@ -1443,6 +1444,15 @@ document.addEventListener("DOMContentLoaded", () => {
             closeDrawer();
         }
     });
+
+    // Explicit Calculate Button Click Handler & Logger (Task 1 & Task 2)
+    const calculateBtn = document.getElementById("calculate-btn");
+    if (calculateBtn) {
+        console.log("CALCULATE BUTTON FOUND");
+        calculateBtn.addEventListener("click", (e) => {
+            console.log("CALCULATE CLICKED");
+        });
+    }
 
     printBtn.addEventListener("click", () => { window.print(); });
 });

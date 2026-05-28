@@ -177,10 +177,7 @@ def get_deduction(
     elif dependents <= 3:
         return 1 / 3
 
-    elif dependents <= 6:
-        return 0.25
-
-    return 0.20
+    return 0.25
 
 
 # ======================================================
