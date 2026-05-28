@@ -645,11 +645,13 @@ def classify_page_type(page_text, page_number):
 def format_suggestions_for_calculator(suggestions):
     """
     Clean Minimal Legal Calculator-Ready Output Formatter.
-    Returns ONLY case_type, fields dictionary, and total_compensation.
-    Filters out fields with confidence score under 70%.
+    Returns ONLY case_type, fields dictionary, total_compensation, and low_confidence_fields.
+    Keeps raw values regardless of confidence to support partial extraction recovery,
+    but tracks fields with under 70% confidence inside low_confidence_fields.
     """
     case_type = suggestions.get("case_type", "death")
     confidence_scores = suggestions.get("confidence_scores", {})
+    low_conf_fields = []
 
     def get_field_val(flat_key, target_score_key, default_val=""):
         score_obj = confidence_scores.get(target_score_key)
@@ -667,18 +669,18 @@ def format_suggestions_for_calculator(suggestions):
         if raw_val is None:
             raw_val = default_val
 
-        # Confidence Rule: If confidence < 70%: leave field blank. Never hallucinate values.
+        # Confidence Rule: track low confidence fields (< 70%) but never blank them!
         conf = 1.0
         if score_obj:
             conf = score_obj.get("confidence", 1.0)
             if conf > 1.0:
                 conf = conf / 100.0
         else:
-            # Check if there is a general confidence fallback
             conf = 1.0 if raw_val != "" else 0.0
 
-        if conf < 0.70:
-            return ""
+        if conf < 0.70 and raw_val != "":
+            low_conf_fields.append(flat_key)
+            
         return raw_val
 
     fields = {}
@@ -720,13 +722,14 @@ def format_suggestions_for_calculator(suggestions):
         tc_conf /= 100.0
     
     total_comp = suggestions.get("total_compensation") or suggestions.get("award_amount") or ""
-    if tc_conf < 0.70:
-        total_comp = ""
+    if tc_conf < 0.70 and total_comp != "":
+        low_conf_fields.append("total_compensation")
 
     return {
         "case_type": case_type,
         "fields": fields,
-        "total_compensation": total_comp
+        "total_compensation": total_comp,
+        "low_confidence_fields": low_conf_fields
     }
 
 

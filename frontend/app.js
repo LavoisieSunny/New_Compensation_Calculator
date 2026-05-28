@@ -164,20 +164,41 @@ document.addEventListener("DOMContentLoaded", () => {
         const caseType = e.target.value;
         
         sharedFields.classList.remove("show");
+        sharedFields.classList.add("hidden-section");
+        
         deathFields.classList.remove("show");
+        deathFields.classList.add("hidden-section");
+        
         injuryFields.classList.remove("show");
+        injuryFields.classList.add("hidden-section");
+        
         formActionsBar.classList.remove("show-flex");
-        if (liveMetricsCard) liveMetricsCard.classList.remove("show");
-        if (evaluatorCard) evaluatorCard.classList.remove("show");
+        formActionsBar.classList.add("hidden-section");
+        
+        if (liveMetricsCard) {
+            liveMetricsCard.classList.remove("show");
+            liveMetricsCard.classList.add("hidden-section");
+        }
+        if (evaluatorCard) {
+            evaluatorCard.classList.remove("show");
+            evaluatorCard.classList.add("hidden-section");
+        }
+        
         singleUploadSection.classList.remove("show");
         singleUploadSection.classList.remove("show-flex");
+        singleUploadSection.classList.add("hidden-section");
 
         setTimeout(() => {
+            sharedFields.classList.remove("hidden-section");
             sharedFields.classList.add("show");
+            
+            singleUploadSection.classList.remove("hidden-section");
             singleUploadSection.classList.add("show-flex");
             
             if (caseType === "injury") {
+                injuryFields.classList.remove("hidden-section");
                 injuryFields.classList.add("show");
+                
                 if (liveDeductionsItem) liveDeductionsItem.classList.add("hidden");
                 if (liveProspectsItem) liveProspectsItem.classList.add("hidden");
                 
@@ -187,7 +208,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
                 if (dependentsInput) dependentsInput.removeAttribute("required");
             } else if (caseType === "death") {
+                deathFields.classList.remove("hidden-section");
                 deathFields.classList.add("show");
+                
                 if (liveDeductionsItem) liveDeductionsItem.classList.remove("hidden");
                 if (liveProspectsItem) liveProspectsItem.classList.remove("hidden");
                 
@@ -198,9 +221,17 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (dependentsInput) dependentsInput.setAttribute("required", "required");
             }
             
+            formActionsBar.classList.remove("hidden-section");
             formActionsBar.classList.add("show-flex");
-            if (liveMetricsCard) liveMetricsCard.classList.add("show");
-            if (evaluatorCard) evaluatorCard.classList.add("show");
+            
+            if (liveMetricsCard) {
+                liveMetricsCard.classList.remove("hidden-section");
+                liveMetricsCard.classList.add("show");
+            }
+            if (evaluatorCard) {
+                evaluatorCard.classList.remove("hidden-section");
+                evaluatorCard.classList.add("show");
+            }
             
             updateLiveCalculations();
         }, 150);
@@ -265,12 +296,45 @@ document.addEventListener("DOMContentLoaded", () => {
         const doaVal = doaInput.value;
         
         const age = calculateAge(dobVal, doaVal);
+        const caseType = caseTypeSelect.value;
         
         if (age !== null) {
             ageInput.value = age;
+            if (liveAge) liveAge.textContent = `${age} years`;
+            
+            const mult = getMultiplier(age);
+            if (liveMultiplier) liveMultiplier.textContent = mult;
+            
+            if (caseType === "death") {
+                const futureType = futureTypeSelect ? futureTypeSelect.value : 2;
+                const prospects = getFutureProspectPercentage(age, futureType);
+                if (liveProspects) liveProspects.textContent = `${prospects}%`;
+                if (liveProspectsBar) liveProspectsBar.style.width = `${prospects}%`;
+                
+                const deps = parseInt(dependentsInput.value) || 0;
+                const status = maritalStatusSelect.value || "married";
+                const deductions = getDeductionPercentage(deps, status);
+                if (liveDeductions) liveDeductions.textContent = `${deductions}%`;
+                if (liveDeductionsBar) liveDeductionsBar.style.width = `${deductions}%`;
+            } else {
+                if (liveProspects) liveProspects.textContent = "—%";
+                if (liveProspectsBar) liveProspectsBar.style.width = "0%";
+                if (liveDeductions) liveDeductions.textContent = "—%";
+                if (liveDeductionsBar) liveDeductionsBar.style.width = "0%";
+            }
         } else {
             ageInput.value = "";
+            if (liveAge) liveAge.textContent = "—";
+            if (liveMultiplier) liveMultiplier.textContent = "—";
+            if (liveProspects) liveProspects.textContent = "—%";
+            if (liveProspectsBar) liveProspectsBar.style.width = "0%";
+            if (liveDeductions) liveDeductions.textContent = "—%";
+            if (liveDeductionsBar) liveDeductionsBar.style.width = "0%";
         }
+    }
+
+    if (futureTypeSelect) {
+        futureTypeSelect.addEventListener("change", updateLiveCalculations);
     }
 
     dobInput.addEventListener("change", updateLiveCalculations);
@@ -1226,14 +1290,29 @@ document.addEventListener("DOMContentLoaded", () => {
         document.querySelectorAll(".ai-metadata-badge").forEach(el => el.remove());
         
         sharedFields.classList.remove("show");
+        sharedFields.classList.add("hidden-section");
+        
         deathFields.classList.remove("show");
+        deathFields.classList.add("hidden-section");
+        
         injuryFields.classList.remove("show");
+        injuryFields.classList.add("hidden-section");
+        
         formActionsBar.classList.remove("show-flex");
-        liveMetricsCard.classList.remove("show");
-        evaluatorCard.classList.remove("show");
+        formActionsBar.classList.add("hidden-section");
+        
+        if (liveMetricsCard) {
+            liveMetricsCard.classList.remove("show");
+            liveMetricsCard.classList.add("hidden-section");
+        }
+        if (evaluatorCard) {
+            evaluatorCard.classList.remove("show");
+            evaluatorCard.classList.add("hidden-section");
+        }
         
         singleUploadSection.classList.remove("show");
         singleUploadSection.classList.remove("show-flex");
+        singleUploadSection.classList.add("hidden-section");
         singlePreviewCard.classList.add("hidden-section");
         singlePreviewCard.classList.remove("show");
         singlePreviewContainer.innerHTML = `

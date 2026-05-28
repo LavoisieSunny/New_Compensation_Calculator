@@ -192,6 +192,17 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label for="future_type">Future Prospects Type <span class="req">*</span></label>
+                                    <div class="select-wrapper">
+                                        <select id="future_type" name="future_type">
+                                            <option value="1">Permanent Job</option>
+                                            <option value="2" selected>Self Employed / Fixed Salary</option>
+                                        </select>
+                                        <i class="fa-solid fa-chevron-down select-arrow"></i>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
                                     <label for="future_prospect">Future Prospects (%) <span class="req">*</span></label>
                                     <div class="input-icon-wrapper">
                                         <i class="fa-solid fa-chart-line field-icon"></i>
@@ -297,7 +308,21 @@
                             </div>
                         </div>
 
-
+                        <!-- Floating Tool Buttons -->
+                        <div class="preview-floating-toolbar" id="preview-floating-toolbar">
+                            <button type="button" class="floating-tool-btn" data-panel="summary" title="AI Summary Briefing">
+                                <i class="fa-solid fa-scroll"></i>
+                            </button>
+                            <button type="button" class="floating-tool-btn" data-panel="table" title="Compensation Table">
+                                <i class="fa-solid fa-table-list"></i>
+                            </button>
+                            <button type="button" class="floating-tool-btn" data-panel="heuristics" title="Live Metrics Heuristics">
+                                <i class="fa-solid fa-chart-line"></i>
+                            </button>
+                            <button type="button" class="floating-tool-btn" data-panel="benchmarks" title="Qdrant Benchmarks">
+                                <i class="fa-solid fa-scale-balanced"></i>
+                            </button>
+                        </div>
 
                     </div>
                 </div>
@@ -425,6 +450,94 @@
                     <button type="button" id="print-btn" class="btn btn-secondary"><i class="fa-solid fa-print"></i> Print Settlement Sheet</button>
                     <button type="button" id="dismiss-modal-btn" class="btn btn-primary">Close</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- Slide-over Drawer Panel -->
+        <div id="right-slideover" class="slideover-panel">
+            <div class="slideover-header">
+                <h3 id="slideover-title">Information Desk</h3>
+                <button type="button" id="close-slideover" class="slideover-close-btn">&times;</button>
+            </div>
+            <div class="slideover-body">
+                
+                <!-- SUMMARY CARD -->
+                <div id="legal-ai-summary-card" class="card slideover-tab-content tab-hidden">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-scroll text-purple"></i> AI Legal Summary</h3>
+                    </div>
+                    <div id="legal-ai-summary-body" class="card-body">
+                        <div class="empty-summary-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; opacity: 0.5; padding: 20px 0;">
+                            <i class="fa-solid fa-gavel" style="font-size: 2.5rem; color: #c084fc;"></i>
+                            <p style="font-size: 0.8rem; color: var(--text-secondary); text-align: center; margin: 0;">Upload a PDF to see the structured legal analysis summary and judicial anomaly checklist.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TABLE CARD -->
+                <div id="compensation-table-card" class="card slideover-tab-content tab-hidden">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-table-list text-green"></i> Extracted Compensation</h3>
+                    </div>
+                    <div id="compensation-table-body" class="card-body">
+                        <div class="empty-table-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; opacity: 0.5; padding: 20px 0;">
+                            <i class="fa-solid fa-table-list" style="font-size: 2.5rem; color: #34d399;"></i>
+                            <p style="font-size: 0.8rem; color: var(--text-secondary); text-align: center; margin: 0;">Upload a PDF to view the detailed breakdown of the judicial award heads.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- LIVE METRICS CARD -->
+                <div id="live-metrics-card" class="card slideover-tab-content tab-hidden">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-chart-line text-glow"></i> Live Multiplier Metrics</h3>
+                    </div>
+                    <div id="live-metrics-body" class="card-body">
+                        <div class="metric-row" id="live-age-item" style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass); align-items: center;">
+                            <span class="metric-label" style="font-size: 0.72rem;">Age</span>
+                            <span id="live-age" class="metric-value" style="font-size: 1.1rem;">—</span>
+                        </div>
+                        <div class="metric-row" id="live-multiplier-item" style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass); align-items: center;">
+                            <span class="metric-label" style="font-size: 0.72rem;">Sarla Verma Multiplier</span>
+                            <span id="live-multiplier" class="metric-value" style="font-size: 1.1rem;">—</span>
+                        </div>
+                        <div class="metric-row" id="live-prospects-item" style="display: flex; flex-direction: column; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span class="metric-label" style="font-size: 0.72rem;">Future Prospects</span>
+                                <span id="live-prospects" class="metric-value" style="font-size: 1.1rem;">—%</span>
+                            </div>
+                            <div class="progress-bar-wrapper" style="margin-top: 4px;">
+                                <div id="live-prospects-bar" class="progress-bar-fill" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="metric-row" id="live-deductions-item" style="display: flex; flex-direction: column; padding: 6px 0;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span class="metric-label" style="font-size: 0.72rem;">Deductions</span>
+                                <span id="live-deductions" class="metric-value" style="font-size: 1.1rem;">—%</span>
+                            </div>
+                            <div class="progress-bar-wrapper" style="margin-top: 4px;">
+                                <div id="live-deductions-bar" class="progress-bar-fill bg-danger" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- EVALUATOR CARD -->
+                <div id="evaluator-card" class="card slideover-tab-content tab-hidden">
+                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <h3><i class="fa-solid fa-scale-balanced text-glow-purple"></i> Qdrant Precedent Benchmark</h3>
+                        <button type="button" id="trigger-eval-btn" class="btn btn-small btn-secondary" style="font-size: 0.72rem; padding: 4px 8px;" disabled>
+                            <i class="fa-solid fa-gavel"></i> Benchmark
+                        </button>
+                    </div>
+                    <div id="evaluator-card-body" class="card-body">
+                        <div class="empty-state" style="padding: 10px 0;">
+                            <i class="fa-solid fa-info-circle"></i>
+                            <p style="font-size: 0.78rem;">Click "Benchmark" to compare calculated compensation against Qdrant precedents.</p>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
