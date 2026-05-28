@@ -342,41 +342,49 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function getMultiplier(age) {
-        if (age === null || age === undefined) return "-";
-        if (age <= 15) return 15; // Corrected to match MPHC PHP formula exactly
-        else if (age <= 25) return 18;
-        else if (age <= 30) return 17;
-        else if (age <= 35) return 16;
-        else if (age <= 40) return 15;
-        else if (age <= 45) return 14;
-        else if (age <= 50) return 13;
-        else if (age <= 55) return 11;
-        else if (age <= 60) return 9;
-        else if (age <= 65) return 7;
+        if (age === null || age === undefined || age === "") return 0;
+        const a = parseInt(age);
+        if (a <= 15) return 15;
+        if (a <= 20) return 18;
+        if (a <= 25) return 18;
+        if (a <= 30) return 17;
+        if (a <= 35) return 16;
+        if (a <= 40) return 15;
+        if (a <= 45) return 14;
+        if (a <= 50) return 13;
+        if (a <= 55) return 11;
+        if (a <= 60) return 9;
+        if (a <= 65) return 7;
         return 5;
     }
 
     function getFutureProspectPercentage(age, futureType) {
-        if (age === null || age === undefined) return 0;
-        if (parseInt(futureType) === 1) {
-            if (age < 40) return 50;
-            if (age < 50) return 30;
-            if (age < 60) return 15;
+        if (age === null || age === undefined || age === "") return 0;
+        const a = parseInt(age);
+        const fType = parseInt(futureType);
+        if (a > 60) return 0;
+        if (fType === 1) {
+            if (a < 40) return 50;
+            if (a <= 50) return 30;
+            if (a <= 60) return 15;
             return 0;
         } else {
-            if (age < 40) return 40;
-            if (age < 50) return 25;
-            if (age < 60) return 10;
+            if (a < 40) return 40;
+            if (a <= 50) return 25;
+            if (a <= 60) return 10;
             return 0;
         }
     }
 
     function getDeductionPercentage(dependents, status) {
-        if (dependents === null || dependents === undefined) return 50;
-        if (status.toLowerCase() === "single") return 50;
-        if (dependents <= 1) return 50;
-        if (dependents <= 3) return 33;
-        return 25;
+        if (dependents === null || dependents === undefined || dependents === "") return 50;
+        const deps = parseInt(dependents);
+        const stat = String(status || "married").trim().toLowerCase();
+        if (stat === "single") return 50;
+        if (deps <= 1) return 50;
+        if (deps <= 3) return 33;
+        if (deps <= 6) return 25;
+        return 20;
     }
 
     function updateLiveCalculations() {
@@ -399,11 +407,52 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (liveProspects) liveProspects.textContent = `${prospects}%`;
                 if (liveProspectsBar) liveProspectsBar.style.width = `${prospects}%`;
                 
+                const futureProspectInput = document.getElementById("future-prospect");
+                if (futureProspectInput) futureProspectInput.value = prospects;
+                
+                const deathMultInput = document.getElementById("death-multiplier");
+                if (deathMultInput) deathMultInput.value = mult;
+                
                 const deps = parseInt(dependentsInput.value) || 0;
                 const status = maritalStatusSelect.value || "married";
                 const deductions = getDeductionPercentage(deps, status);
                 if (liveDeductions) liveDeductions.textContent = `${deductions}%`;
                 if (liveDeductionsBar) liveDeductionsBar.style.width = `${deductions}%`;
+                
+                const deathDeductInput = document.getElementById("death-deduction");
+                if (deathDeductInput) deathDeductInput.value = deductions;
+
+                // Dynamic live calculations
+                const monthlyIncome = parseFloat(monthlyIncomeInput.value) || 0;
+                const annualIncome = monthlyIncome * 12;
+                const futureIncome = annualIncome + (annualIncome * prospects / 100);
+                const deductionAmount = futureIncome * deductions / 100;
+                const dependencyIncome = futureIncome - deductionAmount;
+                const lossOfDependency = dependencyIncome * mult;
+
+                const consortium = parseFloat(document.getElementById("consortium")?.value) || 40000;
+                const funeral = parseFloat(document.getElementById("funeral-expenses")?.value) || 15000;
+                const lossEstate = parseFloat(document.getElementById("loss-estate")?.value) || 15000;
+                const finalComp = lossOfDependency + consortium + funeral + lossEstate;
+
+                // Populate read-only inputs
+                const lossDepInput = document.getElementById("loss-of-dependency");
+                if (lossDepInput) lossDepInput.value = Math.round(lossOfDependency);
+
+                const finalDeathCompInput = document.getElementById("death-final-compensation");
+                if (finalDeathCompInput) finalDeathCompInput.value = Math.round(finalComp);
+
+                // Populate dynamic dashboard elements
+                if (document.getElementById("live-calc-annual")) {
+                    document.getElementById("live-calc-annual").textContent = formatCurrency(annualIncome);
+                    document.getElementById("live-calc-future").textContent = formatCurrency(futureIncome);
+                    document.getElementById("live-calc-deduct-pct").textContent = `${deductions}%`;
+                    document.getElementById("live-calc-deduct-amt").textContent = formatCurrency(deductionAmount);
+                    document.getElementById("live-calc-multiplier").textContent = mult;
+                    document.getElementById("live-calc-dependency").textContent = formatCurrency(lossOfDependency);
+                    document.getElementById("live-calc-total").textContent = formatCurrency(finalComp);
+                }
+
             } else {
                 if (liveProspects) liveProspects.textContent = "—%";
                 if (liveProspectsBar) liveProspectsBar.style.width = "0%";
@@ -418,6 +467,17 @@ document.addEventListener("DOMContentLoaded", () => {
             if (liveProspectsBar) liveProspectsBar.style.width = "0%";
             if (liveDeductions) liveDeductions.textContent = "—%";
             if (liveDeductionsBar) liveDeductionsBar.style.width = "0%";
+
+            // Clear dynamic dashboard elements
+            if (caseType === "death" && document.getElementById("live-calc-annual")) {
+                document.getElementById("live-calc-annual").textContent = "—";
+                document.getElementById("live-calc-future").textContent = "—";
+                document.getElementById("live-calc-deduct-pct").textContent = "—";
+                document.getElementById("live-calc-deduct-amt").textContent = "—";
+                document.getElementById("live-calc-multiplier").textContent = "—";
+                document.getElementById("live-calc-dependency").textContent = "—";
+                document.getElementById("live-calc-total").textContent = "—";
+            }
         }
     }
 
@@ -429,6 +489,18 @@ document.addEventListener("DOMContentLoaded", () => {
     doaInput.addEventListener("change", updateLiveCalculations);
     maritalStatusSelect.addEventListener("change", updateLiveCalculations);
     dependentsInput.addEventListener("input", updateLiveCalculations);
+    monthlyIncomeInput.addEventListener("input", updateLiveCalculations);
+    
+    // Set dynamic update bindings for new Death Claim inputs
+    setTimeout(() => {
+        const consInput = document.getElementById("consortium");
+        const funInput = document.getElementById("funeral-expenses");
+        const estInput = document.getElementById("loss-estate");
+        
+        if (consInput) consInput.addEventListener("input", updateLiveCalculations);
+        if (funInput) funInput.addEventListener("input", updateLiveCalculations);
+        if (estInput) estInput.addEventListener("input", updateLiveCalculations);
+    }, 50);
 
     // ==========================================================================
     // SINGLE PDF WORKSPACE DRAG & DROP + UPLOAD
@@ -1075,9 +1147,9 @@ document.addEventListener("DOMContentLoaded", () => {
             dependents: Number(dependentsInput.value || 0),
             marital_status: maritalStatusSelect.value || "married",
             future_type: Number(futureTypeSelect?.value || 2),
-            consortium: 40000,
-            funeral_expenses: 15000,
-            loss_estate: 15000,
+            consortium: Number(document.getElementById("consortium")?.value || 40000),
+            funeral_expenses: Number(document.getElementById("funeral-expenses")?.value || 15000),
+            loss_estate: Number(document.getElementById("loss-estate")?.value || 15000),
 
             // Consortium breakdown (hardcoded to 0 under the hood)
             conlum: 0,
@@ -1157,36 +1229,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (data.case_type === "death") {
             const futureProspect = getFutureProspectPercentage(age, data.future_type);
-            const enhancedIncome = monthly + (monthly * futureProspect / 100);
-            const annualIncome = enhancedIncome * 12;
-            const dependencyLoss = annualIncome * multiplier;
+            const annualIncome = monthly * 12;
+            const futureIncome = annualIncome + (annualIncome * futureProspect / 100);
             const deductionPercent = getDeductionPercentage(data.dependents, data.marital_status);
-            const deductionVal = dependencyLoss * (deductionPercent / 100);
-            const finalDependency = dependencyLoss - deductionVal;
-            const finalCompensation = finalDependency + data.consortium + data.funeral_expenses + data.loss_estate;
+            const deductionAmount = futureIncome * (deductionPercent / 100);
+            const dependencyIncome = futureIncome - deductionAmount;
+            const lossOfDependency = dependencyIncome * multiplier;
+            const finalCompensation = lossOfDependency + data.consortium + data.funeral_expenses + data.loss_estate;
 
             return {
                 case_type: "death",
                 multiplier: multiplier,
+                future_prospect_percentage: Math.round(futureProspect),
                 future_percentage: Math.round(futureProspect),
-                enhanced_monthly_income: Math.round(enhancedIncome),
+                monthly_income: Math.round(monthly),
                 annual_income: Math.round(annualIncome),
+                future_income: Math.round(futureIncome),
                 deduction_percentage: Math.round(deductionPercent),
-                family_contribution: Math.round(annualIncome * (1 - deductionPercent / 100)),
-                loss_dependency: Math.round(dependencyLoss),
+                deduction_amount: Math.round(deductionAmount),
+                dependency_income: Math.round(dependencyIncome),
+                loss_of_dependency: Math.round(lossOfDependency),
                 consortium: data.consortium,
                 funeral_expenses: data.funeral_expenses,
                 loss_estate: data.loss_estate,
-                conlum: 0,
-                conspo: 0,
-                conpar: 0,
-                conchil: 0,
-                conwif: 0,
-                conmo: 0,
-                confath: 0,
-                conhus: 0,
-                conbro: 0,
-                consis: 0,
+                final_compensation: Math.round(finalCompensation),
                 final_amount: Math.round(finalCompensation)
             };
         } else {
@@ -1236,34 +1302,42 @@ document.addEventListener("DOMContentLoaded", () => {
 
         let parametersHtml = "";
         if (res.case_type === "death") {
+            const futureProspectPercent = res.future_prospect_percentage !== undefined ? res.future_prospect_percentage : (res.future_percentage || 0);
+            const futureIncomeVal = res.future_income !== undefined ? res.future_income : (req.monthly_income * 12 * (1 + futureProspectPercent / 100));
+            const annualIncomeVal = res.annual_income !== undefined ? res.annual_income : (req.monthly_income * 12);
+            
             parametersHtml = `
                 <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
-                    <span>Monthly Income</span>
-                    <strong>${formatCurrency(req.monthly_income)}</strong>
+                    <span>Annual Income</span>
+                    <strong>${formatCurrency(annualIncomeVal)}</strong>
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
-                    <span>Sarla Verma Multiplier</span>
+                    <span>Future Prospect Added</span>
+                    <strong>+${futureProspectPercent}% (${formatCurrency(futureIncomeVal - annualIncomeVal)})</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Deduction Applied</span>
+                    <strong>${res.deduction_percentage}% (-${formatCurrency(res.deduction_amount)})</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
+                    <span>Multiplier Used</span>
                     <strong>${res.multiplier}</strong>
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
-                    <span>Future Prospects</span>
-                    <strong>+${res.future_percentage}%</strong>
+                    <span>Loss of Dependency</span>
+                    <strong>${formatCurrency(res.loss_of_dependency)}</strong>
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
-                    <span>Family Deduction</span>
-                    <strong>${res.deduction_percentage}%</strong>
+                    <span>Consortium</span>
+                    <strong>${formatCurrency(res.consortium)}</strong>
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
-                    <span>Number of Dependents</span>
-                    <strong>${req.dependents}</strong>
-                </div>
-                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
-                    <span>Standard Consortium (Fixed)</span>
-                    <strong>${formatCurrency(40000)}</strong>
+                    <span>Funeral Expenses</span>
+                    <strong>${formatCurrency(res.funeral_expenses)}</strong>
                 </div>
                 <div style="display: flex; justify-content: space-between; padding: 6px 0;">
-                    <span>Funeral Expenses & Estate Loss (Fixed)</span>
-                    <strong>${formatCurrency(30000)}</strong>
+                    <span>Loss of Estate</span>
+                    <strong>${formatCurrency(res.loss_estate)}</strong>
                 </div>
             `;
         } else {
@@ -1298,8 +1372,8 @@ document.addEventListener("DOMContentLoaded", () => {
         modalBodyContent.innerHTML = `
             <div class="results-dashboard simplified-dashboard">
                 <div class="award-hero" style="text-align: center; margin-bottom: 20px;">
-                    <span class="hero-label" style="display: block; font-size: 0.85rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px;">Estimated Award Valuation</span>
-                    <span class="hero-amount" style="display: block; font-size: 2.5rem; font-weight: 800; font-family: 'Outfit', sans-serif; color: var(--color-success); margin: 6px 0; text-shadow: 0 0 20px rgba(52, 211, 153, 0.2);">${formatCurrency(res.final_amount)}</span>
+                    <span class="hero-label" style="display: block; font-size: 0.85rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px;">FINAL COMPENSATION</span>
+                    <span class="hero-amount" style="display: block; font-size: 2.5rem; font-weight: 800; font-family: 'Outfit', sans-serif; color: var(--color-success); margin: 6px 0; text-shadow: 0 0 20px rgba(52, 211, 153, 0.2);">${formatCurrency(res.final_compensation || res.final_amount)}</span>
                     <span class="hero-tag" style="background: rgba(186, 104, 200, 0.2); color: #e9d5ff; border: 1px solid rgba(186, 104, 200, 0.3); font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; display: inline-flex; align-items: center; gap: 6px;"><i class="fa-solid fa-gavel"></i> ${caseTypeLabel}</span>
                 </div>
 
@@ -1322,7 +1396,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const finalCompEl = document.getElementById("final-compensation");
         if (finalCompEl) {
-            finalCompEl.innerText = `₹ ${res.final_amount.toLocaleString("en-IN")}`;
+            finalCompEl.innerText = `₹ ${(res.final_compensation || res.final_amount).toLocaleString("en-IN")}`;
         }
     }
 

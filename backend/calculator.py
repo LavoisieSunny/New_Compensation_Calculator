@@ -207,28 +207,28 @@ def get_future_prospect(
         if age < 40:
             return 0.50
 
-        elif age < 50:
+        elif age <= 50:
             return 0.30
 
-        elif age < 60:
+        elif age <= 60:
             return 0.15
 
-        return 0
+        return 0.0
 
-    # self employed
+    # self employed / fixed salary / daily wage
 
     else:
 
         if age < 40:
             return 0.40
 
-        elif age < 50:
+        elif age <= 50:
             return 0.25
 
-        elif age < 60:
+        elif age <= 60:
             return 0.10
 
-        return 0
+        return 0.0
 
 
 # ======================================================
@@ -251,9 +251,12 @@ def get_deduction(
         return 0.50
 
     elif dependents <= 3:
-        return 1 / 3
+        return 0.33
 
-    return 0.25
+    elif dependents <= 6:
+        return 0.25
+
+    return 0.20
 
 
 # ======================================================
@@ -271,72 +274,47 @@ def calculate_death_compensation(
 
     multiplier = get_multiplier(age)
     future_percent = get_future_prospect(age, future_type)
+    future_prospect_percentage = round(future_percent * 100)
 
-    enhanced_monthly_income = monthly_income + (monthly_income * future_percent)
-    annual_income = enhanced_monthly_income * 12
+    annual_income = monthly_income * 12
+    future_income = annual_income + (annual_income * future_prospect_percentage / 100)
 
-    deduction = get_deduction(dependents, marital_status)
-    family_contribution = annual_income * (1.0 - deduction)
-    loss_dependency = family_contribution * multiplier
+    deduction_ratio = get_deduction(dependents, marital_status)
+    deduction_percentage = round(deduction_ratio * 100)
+    deduction_amount = future_income * (deduction_percentage / 100)
+
+    dependency_income = future_income - deduction_amount
+    loss_of_dependency = dependency_income * multiplier
 
     # Conventional heads with safe_float
     consortium = safe_float(data.consortium, 40000.0)
     funeral_expenses = safe_float(data.funeral_expenses, 15000.0)
     loss_estate = safe_float(data.loss_estate, 15000.0)
 
-    # Sub consortium
-    conlum = safe_float(data.conlum, 0.0)
-    conspo = safe_float(data.conspo, 0.0)
-    conpar = safe_float(data.conpar, 0.0)
-    conchil = safe_float(data.conchil, 0.0)
-    conwif = safe_float(data.conwif, 0.0)
-    conmo = safe_float(data.conmo, 0.0)
-    confath = safe_float(data.confath, 0.0)
-    conhus = safe_float(data.conhus, 0.0)
-    conbro = safe_float(data.conbro, 0.0)
-    consis = safe_float(data.consis, 0.0)
-
-    final_amount = (
-        loss_dependency +
+    final_compensation = (
+        loss_of_dependency +
         consortium +
         funeral_expenses +
-        loss_estate +
-        conlum +
-        conspo +
-        conpar +
-        conchil +
-        conwif +
-        conmo +
-        confath +
-        conhus +
-        conbro +
-        consis
+        loss_estate
     )
 
     return {
         "case_type": "death",
-        "multiplier": multiplier,
-        "future_percentage": round(future_percent * 100),
-        "enhanced_monthly_income": round(enhanced_monthly_income),
         "annual_income": round(annual_income),
-        "deduction_percentage": round(deduction * 100),
-        "family_contribution": round(family_contribution),
-        "loss_dependency": round(loss_dependency),
+        "future_income": round(future_income),
+        "future_prospect_percentage": future_prospect_percentage,
+        "deduction_percentage": deduction_percentage,
+        "deduction_amount": round(deduction_amount),
+        "dependency_income": round(dependency_income),
+        "multiplier": multiplier,
+        "loss_of_dependency": round(loss_of_dependency),
         "consortium": consortium,
         "funeral_expenses": funeral_expenses,
         "loss_estate": loss_estate,
-        "conlum": conlum,
-        "conspo": conspo,
-        "conpar": conpar,
-        "conchil": conchil,
-        "conwif": conwif,
-        "conmo": conmo,
-        "confath": confath,
-        "conhus": conhus,
-        "conbro": conbro,
-        "consis": consis,
-        "final_amount": round(final_amount),
+        "final_compensation": round(final_compensation),
+        "final_amount": round(final_compensation)
     }
+
 
 
 # ======================================================
