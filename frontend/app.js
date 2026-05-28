@@ -90,6 +90,84 @@ document.addEventListener("DOMContentLoaded", () => {
     const dismissModalBtn = document.getElementById("dismiss-modal-btn");
     const printBtn = document.getElementById("print-btn");
 
+    // Glassmorphic Premium Toast Notification System
+    function showToast(message, type = "info") {
+        let container = document.getElementById("toast-container");
+        if (!container) {
+            container = document.createElement("div");
+            container.id = "toast-container";
+            container.style.cssText = `
+                position: fixed;
+                bottom: 24px;
+                right: 24px;
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                z-index: 9999;
+                max-width: 360px;
+                pointer-events: none;
+            `;
+            document.body.appendChild(container);
+        }
+
+        const toast = document.createElement("div");
+        toast.className = `toast toast-${type}`;
+        
+        let icon = "fa-info-circle";
+        let color = "var(--color-primary, #3b82f6)";
+        if (type === "success") {
+            icon = "fa-circle-check";
+            color = "#10b981";
+        } else if (type === "error") {
+            icon = "fa-triangle-exclamation";
+            color = "#ef4444";
+        } else if (type === "warning") {
+            icon = "fa-circle-exclamation";
+            color = "#f59e0b";
+        }
+
+        toast.style.cssText = `
+            background: rgba(30, 41, 59, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-left: 4px solid ${color};
+            color: #f1f5f9;
+            padding: 14px 18px;
+            border-radius: 8px;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.875rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transform: translateY(20px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: auto;
+        `;
+
+        toast.innerHTML = `
+            <i class="fa-solid ${icon}" style="color: ${color}; font-size: 1.125rem;"></i>
+            <span style="flex-grow: 1; line-height: 1.4;">${message}</span>
+        `;
+
+        container.appendChild(toast);
+
+        setTimeout(() => {
+            toast.style.transform = "translateY(0)";
+            toast.style.opacity = "1";
+        }, 50);
+
+        setTimeout(() => {
+            toast.style.transform = "translateY(-20px)";
+            toast.style.opacity = "0";
+            setTimeout(() => {
+                toast.remove();
+            }, 300);
+        }, 4000);
+    }
+
     // ==========================================================================
     // SIDEBAR TAB CONTROLLERS
     // ==========================================================================
@@ -1031,16 +1109,13 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==========================================================================
     // FORM CALCULATOR API SUBMISSION
     // ==========================================================================
-    // ==========================================================================
-    // FORM CALCULATOR API SUBMISSION
-    // ==========================================================================
     compensationForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         console.log("CALCULATE CLICKED");
         
         const caseType = caseTypeSelect.value;
         if (!caseType) {
-            alert("Please select a case type first!");
+            showToast("Please select a case type first!", "warning");
             return;
         }
 
@@ -1094,19 +1169,28 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: JSON.stringify(payload)
             });
 
-            if (!response.ok) throw new Error("Calculator error");
+            if (!response.ok) throw new Error("Server calculator returned error status");
             const results = await response.json();
             
-            currentCalculationAmount = results.final_amount;
-            renderResultsDashboard(results, payload);
+            if (results.success === false) {
+                throw new Error(results.error || "Server calculation process failed");
+            }
+            
+            // Align with nested schema: use results.breakdown if available, otherwise flat results
+            const breakdown = results.breakdown || results;
+            currentCalculationAmount = results.total_compensation || breakdown.final_amount || 0;
+            
+            renderResultsDashboard(breakdown, payload);
             openModal();
+            showToast("Compensation calculated successfully via FastAPI server!", "success");
 
             // Enable Evaluator button
             if (triggerEvalBtn) triggerEvalBtn.disabled = false;
 
         } catch (error) {
-            console.error("Calculation failed:", error);
-            alert("Calculation failed on the server. Falling back to local calculator.");
+            console.error("Server-side calculation failed:", error);
+            showToast(`Backend computation failed: ${error.message}. Running local mathematical fallback engine.`, "warning");
+            
             const localResults = calculateCompensationLocally(payload);
             
             currentCalculationAmount = localResults.final_amount;
@@ -1195,11 +1279,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function renderResultsDashboard(res, req) {
-        const claimantName = document.getElementById("name").value || "N/A";
-        const fatherNameVal = document.getElementById("father_name").value || "N/A";
+        const claimantName = document.getElementById("name")?.value || "N/A";
+        const fatherNameVal = document.getElementById("father-name")?.value || "N/A";
         const dateAccidentVal = doaInput.value ? new Date(doaInput.value).toLocaleDateString('en-IN') : "N/A";
         const dateBirthVal = dobInput.value ? new Date(dobInput.value).toLocaleDateString('en-IN') : "N/A";
-        const placeAccidentVal = document.getElementById("place_of_accident")?.value || "N/A";
+        const placeAccidentVal = document.getElementById("place-of-accident")?.value || "N/A";
         const caseTypeLabel = res.case_type === "death" ? "Death Claim" : "Injury Claim";
 
         let parametersHtml = "";

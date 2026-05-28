@@ -1,7 +1,30 @@
+import logging
+from typing import Any, Optional
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
+logger = logging.getLogger("backend.calculator")
 router = APIRouter()
+
+# ======================================================
+# SAFE NUMERIC PARSING HELPERS (Task 4)
+# ======================================================
+
+def safe_float(val, default=0.0) -> float:
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+def safe_int(val, default=0) -> int:
+    if val is None:
+        return default
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
 
 # ======================================================
 # REQUEST MODEL
@@ -13,11 +36,11 @@ class CompensationRequest(BaseModel):
     # COMMON
     # ==================================================
 
-    case_type: str
+    case_type: str = "injury"
 
-    age: int
+    age: int = 30
 
-    monthly_income: float
+    monthly_income: float = 0.0
 
     # ==================================================
     # DEATH CASE
@@ -29,52 +52,101 @@ class CompensationRequest(BaseModel):
 
     future_type: int = 2
 
-    consortium: float = 40000
+    consortium: float = 40000.0
 
-    funeral_expenses: float = 15000
+    funeral_expenses: float = 15000.0
 
-    loss_estate: float = 15000
+    loss_estate: float = 15000.0
 
     # Consortium Breakdown Subheadings (from PHP claim calculator)
-    conlum: float = 0
-    conspo: float = 0
-    conpar: float = 0
-    conchil: float = 0
-    conwif: float = 0
-    conmo: float = 0
-    confath: float = 0
-    conhus: float = 0
-    conbro: float = 0
-    consis: float = 0
+    conlum: float = 0.0
+    conspo: float = 0.0
+    conpar: float = 0.0
+    conchil: float = 0.0
+    conwif: float = 0.0
+    conmo: float = 0.0
+    confath: float = 0.0
+    conhus: float = 0.0
+    conbro: float = 0.0
+    consis: float = 0.0
 
     # ==================================================
     # INJURY CASE
     # ==================================================
 
-    disability: float = 0
+    disability: float = 0.0
 
-    medical_expenses: float = 0
+    medical_expenses: float = 0.0
 
-    future_medical_expenses: float = 0
+    future_medical_expenses: float = 0.0
 
-    pain_and_suffering: float = 0
+    pain_and_suffering: float = 0.0
 
-    transportation: float = 0
+    transportation: float = 0.0
 
-    special_diet: float = 0
+    special_diet: float = 0.0
 
-    attender_charges: float = 0
+    attender_charges: float = 0.0
 
-    loss_of_income: float = 0
+    loss_of_income: float = 0.0
 
     # Additional pecuniary/non-pecuniary heads (from PHP claim calculator)
-    coliti: float = 0
-    misex: float = 0
-    loamiti: float = 0
-    lopmarri: float = 0
-    loexlife: float = 0
-    loveaff: float = 0
-    lossofenjoy: float = 0
+    coliti: float = 0.0
+    misex: float = 0.0
+    loamiti: float = 0.0
+    lopmarri: float = 0.0
+    loexlife: float = 0.0
+    loveaff: float = 0.0
+    lossofenjoy: float = 0.0
+
+    @model_validator(mode='before')
+    @classmethod
+    def clean_empty_strings(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        
+        cleaned = {}
+        for k, v in data.items():
+            # If the value is empty string, string 'null', string 'NaN', or None
+            if v == "" or v == "NaN" or v == "null" or v is None:
+                # Provide safe defaults if the value is empty
+                if k == "case_type":
+                    cleaned[k] = "injury"
+                elif k == "marital_status":
+                    cleaned[k] = "married"
+                elif k in ["age", "future_type"]:
+                    cleaned[k] = 30 if k == "age" else 2
+                elif k in ["monthly_income", "consortium", "funeral_expenses", "loss_estate", "disability"]:
+                    if k == "consortium":
+                        cleaned[k] = 40000.0
+                    elif k in ["funeral_expenses", "loss_estate"]:
+                        cleaned[k] = 15000.0
+                    else:
+                        cleaned[k] = 0.0
+                else:
+                    cleaned[k] = 0.0 if k in [
+                        "medical_expenses", "future_medical_expenses", "pain_and_suffering",
+                        "transportation", "special_diet", "attender_charges", "loss_of_income",
+                        "conlum", "conspo", "conpar", "conchil", "conwif", "conmo", "confath",
+                        "conhus", "conbro", "consis", "coliti", "misex", "loamiti", "lopmarri",
+                        "loexlife", "loveaff", "lossofenjoy"
+                    ] else 0
+            else:
+                # Coerce numeric values if passed as string but non-empty
+                if k in ["age", "dependents", "future_type"]:
+                    cleaned[k] = safe_int(v)
+                elif k in [
+                    "monthly_income", "consortium", "funeral_expenses", "loss_estate", "disability",
+                    "medical_expenses", "future_medical_expenses", "pain_and_suffering",
+                    "transportation", "special_diet", "attender_charges", "loss_of_income",
+                    "conlum", "conspo", "conpar", "conchil", "conwif", "conmo", "confath",
+                    "conhus", "conbro", "consis", "coliti", "misex", "loamiti", "lopmarri",
+                    "loexlife", "loveaff", "lossofenjoy"
+                ]:
+                    cleaned[k] = safe_float(v)
+                else:
+                    cleaned[k] = v
+        return cleaned
 
 
 # ======================================================
@@ -167,6 +239,10 @@ def get_deduction(
     dependents: int,
     marital_status: str
 ):
+    if not marital_status:
+        marital_status = "married"
+        
+    dependents = safe_int(dependents, 0)
 
     if marital_status.lower() == "single":
         return 0.50
@@ -187,141 +263,79 @@ def get_deduction(
 def calculate_death_compensation(
     data: CompensationRequest
 ):
+    age = safe_int(data.age, 30)
+    monthly_income = safe_float(data.monthly_income, 0.0)
+    dependents = safe_int(data.dependents, 0)
+    marital_status = data.marital_status or "married"
+    future_type = safe_int(data.future_type, 2)
 
-    multiplier = get_multiplier(
-        data.age
-    )
+    multiplier = get_multiplier(age)
+    future_percent = get_future_prospect(age, future_type)
 
-    future_percent = get_future_prospect(
-        data.age,
-        data.future_type
-    )
+    enhanced_monthly_income = monthly_income + (monthly_income * future_percent)
+    annual_income = enhanced_monthly_income * 12
 
-    enhanced_monthly_income = (
+    deduction = get_deduction(dependents, marital_status)
+    family_contribution = annual_income * (1.0 - deduction)
+    loss_dependency = family_contribution * multiplier
 
-        data.monthly_income +
+    # Conventional heads with safe_float
+    consortium = safe_float(data.consortium, 40000.0)
+    funeral_expenses = safe_float(data.funeral_expenses, 15000.0)
+    loss_estate = safe_float(data.loss_estate, 15000.0)
 
-        (
-            data.monthly_income *
-            future_percent
-        )
-    )
-
-    annual_income = (
-        enhanced_monthly_income * 12
-    )
-
-    deduction = get_deduction(
-        data.dependents,
-        data.marital_status
-    )
-
-    family_contribution = (
-
-        annual_income *
-
-        (1 - deduction)
-    )
-
-    loss_dependency = (
-
-        family_contribution *
-
-        multiplier
-    )
+    # Sub consortium
+    conlum = safe_float(data.conlum, 0.0)
+    conspo = safe_float(data.conspo, 0.0)
+    conpar = safe_float(data.conpar, 0.0)
+    conchil = safe_float(data.conchil, 0.0)
+    conwif = safe_float(data.conwif, 0.0)
+    conmo = safe_float(data.conmo, 0.0)
+    confath = safe_float(data.confath, 0.0)
+    conhus = safe_float(data.conhus, 0.0)
+    conbro = safe_float(data.conbro, 0.0)
+    consis = safe_float(data.consis, 0.0)
 
     final_amount = (
-
         loss_dependency +
-
-        data.consortium +
-
-        data.funeral_expenses +
-
-        data.loss_estate +
-
-        data.conlum +
-
-        data.conspo +
-
-        data.conpar +
-
-        data.conchil +
-
-        data.conwif +
-
-        data.conmo +
-
-        data.confath +
-
-        data.conhus +
-
-        data.conbro +
-
-        data.consis
+        consortium +
+        funeral_expenses +
+        loss_estate +
+        conlum +
+        conspo +
+        conpar +
+        conchil +
+        conwif +
+        conmo +
+        confath +
+        conhus +
+        conbro +
+        consis
     )
 
     return {
-
         "case_type": "death",
-
-        "multiplier":
-            multiplier,
-
-        "future_percentage":
-            round(
-                future_percent * 100
-            ),
-
-        "enhanced_monthly_income":
-            round(
-                enhanced_monthly_income
-            ),
-
-        "annual_income":
-            round(
-                annual_income
-            ),
-
-        "deduction_percentage":
-            round(
-                deduction * 100
-            ),
-
-        "family_contribution":
-            round(
-                family_contribution
-            ),
-
-        "loss_dependency":
-            round(
-                loss_dependency
-            ),
-
-        "consortium":
-            data.consortium,
-
-        "funeral_expenses":
-            data.funeral_expenses,
-
-        "loss_estate":
-            data.loss_estate,
-
-        "conlum": data.conlum,
-        "conspo": data.conspo,
-        "conpar": data.conpar,
-        "conchil": data.conchil,
-        "conwif": data.conwif,
-        "conmo": data.conmo,
-        "confath": data.confath,
-        "conhus": data.conhus,
-        "conbro": data.conbro,
-        "consis": data.consis,
-
-        "final_amount":
-            round(
-                final_amount
-            ),
+        "multiplier": multiplier,
+        "future_percentage": round(future_percent * 100),
+        "enhanced_monthly_income": round(enhanced_monthly_income),
+        "annual_income": round(annual_income),
+        "deduction_percentage": round(deduction * 100),
+        "family_contribution": round(family_contribution),
+        "loss_dependency": round(loss_dependency),
+        "consortium": consortium,
+        "funeral_expenses": funeral_expenses,
+        "loss_estate": loss_estate,
+        "conlum": conlum,
+        "conspo": conspo,
+        "conpar": conpar,
+        "conchil": conchil,
+        "conwif": conwif,
+        "conmo": conmo,
+        "confath": confath,
+        "conhus": conhus,
+        "conbro": conbro,
+        "consis": consis,
+        "final_amount": round(final_amount),
     }
 
 
@@ -332,109 +346,68 @@ def calculate_death_compensation(
 def calculate_injury_compensation(
     data: CompensationRequest
 ):
+    age = safe_int(data.age, 30)
+    monthly_income = safe_float(data.monthly_income, 0.0)
+    disability = safe_float(data.disability, 0.0)
 
-    multiplier = get_multiplier(
-        data.age
-    )
+    multiplier = get_multiplier(age)
+    annual_income = monthly_income * 12
+    future_income_loss = annual_income * (disability / 100.0) * multiplier
 
-    annual_income = (
-        data.monthly_income * 12
-    )
+    medical_expenses = safe_float(data.medical_expenses, 0.0)
+    future_medical_expenses = safe_float(data.future_medical_expenses, 0.0)
+    pain_and_suffering = safe_float(data.pain_and_suffering, 0.0)
+    transportation = safe_float(data.transportation, 0.0)
+    special_diet = safe_float(data.special_diet, 0.0)
+    attender_charges = safe_float(data.attender_charges, 0.0)
+    loss_of_income = safe_float(data.loss_of_income, 0.0)
 
-    future_income_loss = (
-
-        annual_income *
-
-        (
-            data.disability / 100
-        ) *
-
-        multiplier
-    )
+    coliti = safe_float(data.coliti, 0.0)
+    misex = safe_float(data.misex, 0.0)
+    loamiti = safe_float(data.loamiti, 0.0)
+    lopmarri = safe_float(data.lopmarri, 0.0)
+    loexlife = safe_float(data.loexlife, 0.0)
+    loveaff = safe_float(data.loveaff, 0.0)
+    lossofenjoy = safe_float(data.lossofenjoy, 0.0)
 
     final_amount = (
-
         future_income_loss +
-
-        data.medical_expenses +
-
-        data.future_medical_expenses +
-
-        data.pain_and_suffering +
-
-        data.transportation +
-
-        data.special_diet +
-
-        data.attender_charges +
-
-        data.loss_of_income +
-
-        data.coliti +
-
-        data.misex +
-
-        data.loamiti +
-
-        data.lopmarri +
-
-        data.loexlife +
-
-        data.loveaff +
-
-        data.lossofenjoy
+        medical_expenses +
+        future_medical_expenses +
+        pain_and_suffering +
+        transportation +
+        special_diet +
+        attender_charges +
+        loss_of_income +
+        coliti +
+        misex +
+        loamiti +
+        lopmarri +
+        loexlife +
+        loveaff +
+        lossofenjoy
     )
 
     return {
-
         "case_type": "injury",
-
-        "multiplier":
-            multiplier,
-
-        "annual_income":
-            round(
-                annual_income
-            ),
-
-        "future_income_loss":
-            round(
-                future_income_loss
-            ),
-
-        "medical_expenses":
-            data.medical_expenses,
-
-        "future_medical_expenses":
-            data.future_medical_expenses,
-
-        "pain_and_suffering":
-            data.pain_and_suffering,
-
-        "transportation":
-            data.transportation,
-
-        "special_diet":
-            data.special_diet,
-
-        "attender_charges":
-            data.attender_charges,
-
-        "loss_of_income":
-            data.loss_of_income,
-
-        "coliti": data.coliti,
-        "misex": data.misex,
-        "loamiti": data.loamiti,
-        "lopmarri": data.lopmarri,
-        "loexlife": data.loexlife,
-        "loveaff": data.loveaff,
-        "lossofenjoy": data.lossofenjoy,
-
-        "final_amount":
-            round(
-                final_amount
-            ),
+        "multiplier": multiplier,
+        "annual_income": round(annual_income),
+        "future_income_loss": round(future_income_loss),
+        "medical_expenses": medical_expenses,
+        "future_medical_expenses": future_medical_expenses,
+        "pain_and_suffering": pain_and_suffering,
+        "transportation": transportation,
+        "special_diet": special_diet,
+        "attender_charges": attender_charges,
+        "loss_of_income": loss_of_income,
+        "coliti": coliti,
+        "misex": misex,
+        "loamiti": loamiti,
+        "lopmarri": lopmarri,
+        "loexlife": loamiti,
+        "loveaff": loveaff,
+        "lossofenjoy": lossofenjoy,
+        "final_amount": round(final_amount),
     }
 
 
@@ -446,13 +419,41 @@ def calculate_injury_compensation(
 async def calculate_compensation(
     data: CompensationRequest
 ):
+    logger.info(f"Incoming calculation request payload: {data.dict() if data else 'None'}")
+    try:
+        case_type = str(data.case_type).strip().lower()
+        logger.info(f"Parsed calculation case_type: {case_type}")
+        
+        if case_type == "death":
+            breakdown = calculate_death_compensation(data)
+        else:
+            breakdown = calculate_injury_compensation(data)
 
-    if data.case_type == "death":
+        # Log formula inputs & parsed parameters as requested
+        logger.info(f"Formula inputs & parsed parameters: {breakdown}")
+        
+        final_amount = breakdown.get("final_amount", 0)
+        
+        # Build standard Step 7 stable nested output schema
+        response = {
+            "success": True,
+            "calculation_type": case_type,
+            "total_compensation": final_amount,
+            "breakdown": breakdown
+        }
+        # Merge breakdown keys into root for backwards compatibility with any flat-keyed expectations
+        response.update(breakdown)
 
-        return calculate_death_compensation(
-            data
-        )
+        logger.info(f"Successfully computed compensation. Total: {final_amount}")
+        return response
 
-    return calculate_injury_compensation(
-        data
-    )
+    except Exception as e:
+        logger.exception("CRITICAL EXCEPTION IN SERVER COMPENSATION CALCULATION PIPELINE:")
+        # Return stable schema even on failures to prevent frontend crash
+        return {
+            "success": False,
+            "calculation_type": data.case_type if data else "unknown",
+            "total_compensation": 0,
+            "breakdown": {},
+            "error": str(e)
+        }
