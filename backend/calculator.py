@@ -251,7 +251,7 @@ def get_deduction(
         return 0.50
 
     elif dependents <= 3:
-        return 0.33
+        return 1 / 3
 
     elif dependents <= 6:
         return 0.25
@@ -281,7 +281,7 @@ def calculate_death_compensation(
 
     deduction_ratio = get_deduction(dependents, marital_status)
     deduction_percentage = round(deduction_ratio * 100)
-    deduction_amount = future_income * (deduction_percentage / 100)
+    deduction_amount = future_income * deduction_ratio
 
     dependency_income = future_income - deduction_amount
     loss_of_dependency = dependency_income * multiplier

@@ -376,15 +376,15 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    function getDeductionPercentage(dependents, status) {
-        if (dependents === null || dependents === undefined || dependents === "") return 50;
+    function getDeductionRatio(dependents, status) {
+        if (dependents === null || dependents === undefined || dependents === "") return 0.50;
         const deps = parseInt(dependents);
         const stat = String(status || "married").trim().toLowerCase();
-        if (stat === "single") return 50;
-        if (deps <= 1) return 50;
-        if (deps <= 3) return 33;
-        if (deps <= 6) return 25;
-        return 20;
+        if (stat === "single") return 0.50;
+        if (deps <= 1) return 0.50;
+        if (deps <= 3) return 1 / 3;
+        if (deps <= 6) return 0.25;
+        return 0.20;
     }
 
     function updateLiveCalculations() {
@@ -415,18 +415,19 @@ document.addEventListener("DOMContentLoaded", () => {
                 
                 const deps = parseInt(dependentsInput.value) || 0;
                 const status = maritalStatusSelect.value || "married";
-                const deductions = getDeductionPercentage(deps, status);
-                if (liveDeductions) liveDeductions.textContent = `${deductions}%`;
-                if (liveDeductionsBar) liveDeductionsBar.style.width = `${deductions}%`;
+                const deductionRatio = getDeductionRatio(deps, status);
+                const deductionsPercent = Math.round(deductionRatio * 100);
+                if (liveDeductions) liveDeductions.textContent = `${deductionsPercent}%`;
+                if (liveDeductionsBar) liveDeductionsBar.style.width = `${deductionsPercent}%`;
                 
                 const deathDeductInput = document.getElementById("death-deduction");
-                if (deathDeductInput) deathDeductInput.value = deductions;
+                if (deathDeductInput) deathDeductInput.value = deductionsPercent;
 
                 // Dynamic live calculations
                 const monthlyIncome = parseFloat(monthlyIncomeInput.value) || 0;
                 const annualIncome = monthlyIncome * 12;
                 const futureIncome = annualIncome + (annualIncome * prospects / 100);
-                const deductionAmount = futureIncome * deductions / 100;
+                const deductionAmount = futureIncome * deductionRatio;
                 const dependencyIncome = futureIncome - deductionAmount;
                 const lossOfDependency = dependencyIncome * mult;
 
@@ -446,7 +447,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (document.getElementById("live-calc-annual")) {
                     document.getElementById("live-calc-annual").textContent = formatCurrency(annualIncome);
                     document.getElementById("live-calc-future").textContent = formatCurrency(futureIncome);
-                    document.getElementById("live-calc-deduct-pct").textContent = `${deductions}%`;
+                    document.getElementById("live-calc-deduct-pct").textContent = `${deductionsPercent}%`;
                     document.getElementById("live-calc-deduct-amt").textContent = formatCurrency(deductionAmount);
                     document.getElementById("live-calc-multiplier").textContent = mult;
                     document.getElementById("live-calc-dependency").textContent = formatCurrency(lossOfDependency);
@@ -1231,8 +1232,9 @@ document.addEventListener("DOMContentLoaded", () => {
             const futureProspect = getFutureProspectPercentage(age, data.future_type);
             const annualIncome = monthly * 12;
             const futureIncome = annualIncome + (annualIncome * futureProspect / 100);
-            const deductionPercent = getDeductionPercentage(data.dependents, data.marital_status);
-            const deductionAmount = futureIncome * (deductionPercent / 100);
+            const deductionRatio = getDeductionRatio(data.dependents, data.marital_status);
+            const deductionPercent = Math.round(deductionRatio * 100);
+            const deductionAmount = futureIncome * deductionRatio;
             const dependencyIncome = futureIncome - deductionAmount;
             const lossOfDependency = dependencyIncome * multiplier;
             const finalCompensation = lossOfDependency + data.consortium + data.funeral_expenses + data.loss_estate;
