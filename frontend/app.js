@@ -520,66 +520,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (liveMetricsCard) liveMetricsCard.classList.add("show");
                 if (evaluatorCard) evaluatorCard.classList.add("show");
 
-                alert("Case PDF analyzed! Form auto-filled focusing on Previous Judgment, Petition, and Prayer details. Please manually review fields and click 'Calculate' to compute compensation.");
+                showToast("Case PDF analyzed! Form auto-filled focusing on Previous Judgment, Petition, and Prayer details. Please manually review fields.", "success");
             } else {
-                alert("Failed to extract data from the PDF.");
+                showToast("Failed to extract data from the PDF: " + (data.message || "Unknown OCR error."), "error");
             }
         } catch (error) {
             loader.remove();
             console.error("Single PDF OCR error:", error);
-            alert("Offline Sandbox Mode: Triggering high-fidelity simulated OCR auto-fill for developer testing.");
-            
-            // Mock offline fallback auto-filling based on selected case type
-            const caseType = caseTypeSelect.value;
-            const mockSuggestions = caseType === "death" ? {
-                case_type: "death",
-                fields: {
-                    deceased_name: "Late Smt. Sunita Devi",
-                    father_name: "Late Shri Vijay Pal",
-                    date_of_birth: "08-08-1984",
-                    date_of_accident: "22-09-2024",
-                    age: 40,
-                    monthly_income: 30000,
-                    marital_status: "married",
-                    future_prospect: 25,
-                    place_of_accident: "National Highway NH-3, Bypass Crossing"
-                },
-                total_compensation: 615000
-            } : {
-                case_type: "injury",
-                fields: {
-                    injured_name: "Shri Rajesh Kumar Sharma",
-                    father_name: "Shri Om Prakash Sharma",
-                    date_of_birth: "12-04-1992",
-                    date_of_accident: "15-10-2024",
-                    age: 32,
-                    monthly_income: 25000,
-                    disability: 40,
-                    dependents: 3,
-                    medical_expenses: 15000,
-                    pain_and_suffering: 10000,
-                    transportation: 5000,
-                    special_diet: 3000,
-                    attender_charges: 4000,
-                    future_medical_expenses: 12000,
-                    loss_of_income: 8000,
-                    place_of_accident: "Bypass Road, near Jabalpur Crossing"
-                },
-                total_compensation: 250000
-            };
-
-            applyAllOcrSuggestions(mockSuggestions);
-
-            // Render mock preview
-            singlePreviewFilename.innerHTML = `${file.name} <span class="badge source-badge" style="margin-left: 8px; background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; display: inline-block;">Source: AI Recovery (Offline)</span>`;
-            singlePreviewContainer.innerHTML = `
-                <div class="preview-empty-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 10px;">
-                    <i class="fa-solid fa-file-pdf" style="font-size: 3rem; color: var(--color-success)"></i>
-                    <p style="font-size: 0.8rem; color: var(--text-secondary)">Offline Preview active for <strong>${file.name}</strong></p>
-                </div>
-            `;
-            singlePreviewCard.classList.remove("hidden-section");
-            singlePreviewCard.classList.add("show");
+            showToast(`OCR processing failed: ${error.message}. Please verify the central FastAPI server is fully initialized.`, "error");
         }
     }
 
