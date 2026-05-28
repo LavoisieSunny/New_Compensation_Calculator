@@ -808,9 +808,25 @@ def perform_ocr_page_with_retry(ocr_engine, page_doc, page_idx: int, total_pages
                     "lines": len(lines_1)
                 }
                 
-            if score_1 >= 0.70:
-                logger.info(f"Attempt 1 was strong (score: {score_1:.4f} >= 0.70). Stopping early.")
-                return best_lines, best_meta
+            # Early OOM Protection & stopping check:
+            # Dense pages with high confidence already contain clean text. Continuing to Attempt 2 (300 DPI)
+            # causes massive memory spikes, making CPU servers highly prone to Linux OOM-killer crashes ("Killed").
+            if score_1 >= 0.70 or (conf_1 >= 0.75 and len(lines_1) >= 40):
+                logger.info(
+                    f"Page {page_num}: Attempt 1 was strong (score={score_1:.4f}, lines={len(lines_1)}, conf={conf_1:.2f}). "
+                    f"Stopping early to protect system memory and prevent OOM crash."
+                )
+                page_meta = {
+                    "page": page_num,
+                    "engine": "PaddleOCR",
+                    "dpi": 216,
+                    "confidence": round(conf_1, 3),
+                    "text_length": sum(len(l) for l in lines_1),
+                    "quality_score": score_1,
+                    "preprocessing_applied": ["grayscale", "auto-deskew", "bilateral_denoise", "clahe", "unsharp_mask"],
+                    "lines": len(lines_1)
+                }
+                return lines_1, page_meta
         else:
             logger.warning("PaddleOCR engine not available for Attempt 1.")
     except Exception as e:
@@ -856,7 +872,17 @@ def perform_ocr_page_with_retry(ocr_engine, page_doc, page_idx: int, total_pages
                 
             if score_2 >= 0.70:
                 logger.info(f"Attempt 2 was strong (score: {score_2:.4f} >= 0.70). Stopping early.")
-                return best_lines, best_meta
+                page_meta = {
+                    "page": page_num,
+                    "engine": "PaddleOCR",
+                    "dpi": 300,
+                    "confidence": round(conf_2, 3),
+                    "text_length": sum(len(l) for l in lines_2),
+                    "quality_score": score_2,
+                    "preprocessing_applied": ["grayscale", "auto-deskew", "bilateral_denoise", "clahe", "unsharp_mask_300DPI"],
+                    "lines": len(lines_2)
+                }
+                return lines_2, page_meta
         else:
             logger.warning("PaddleOCR engine not available for Attempt 2.")
     except Exception as e:
@@ -893,7 +919,17 @@ def perform_ocr_page_with_retry(ocr_engine, page_doc, page_idx: int, total_pages
                 
             if score_3 >= 0.70:
                 logger.info(f"Attempt 3 was strong (score: {score_3:.4f} >= 0.70). Stopping early.")
-                return best_lines, best_meta
+                page_meta = {
+                    "page": page_num,
+                    "engine": "Tesseract",
+                    "dpi": 300,
+                    "confidence": round(conf_3, 3),
+                    "text_length": sum(len(l) for l in lines_3),
+                    "quality_score": score_3,
+                    "preprocessing_applied": ["grayscale", "auto-deskew", "bilateral_denoise", "clahe", "unsharp_mask", "binarize_otsu_adaptive"],
+                    "lines": len(lines_3)
+                }
+                return lines_3, page_meta
         except Exception as e:
             logger.error(f"Attempt 3 failed: {str(e)}")
     else:
@@ -932,7 +968,17 @@ def perform_ocr_page_with_retry(ocr_engine, page_doc, page_idx: int, total_pages
             
         if score_4 >= 0.70:
             logger.info(f"Attempt 4 was strong (score: {score_4:.4f} >= 0.70). Stopping early.")
-            return best_lines, best_meta
+            page_meta = {
+                "page": page_num,
+                "engine": "PyMuPDF",
+                "dpi": 72,
+                "confidence": 1.0,
+                "text_length": sum(len(l) for l in lines_4),
+                "quality_score": score_4,
+                "preprocessing_applied": [],
+                "lines": len(lines_4)
+            }
+            return lines_4, page_meta
     except Exception as e:
         logger.error(f"Attempt 4 failed: {str(e)}")
         
