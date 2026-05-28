@@ -948,7 +948,7 @@ document.addEventListener("DOMContentLoaded", () => {
         };
     }
 
-    function renderPrecedentEvaluation(eval) {
+    function renderPrecedentEvaluation(evalData) {
         const alignLabels = {
             aligned: `<span class="eval-badge aligned"><i class="fa-solid fa-circle-check"></i> Aligned</span>`,
             high: `<span class="eval-badge high"><i class="fa-solid fa-triangle-exclamation"></i> High Valuation</span>`,
@@ -956,7 +956,7 @@ document.addEventListener("DOMContentLoaded", () => {
         };
 
         let precedentsHtml = "";
-        eval.precedents.forEach(p => {
+        evalData.precedents.forEach(p => {
             precedentsHtml += `
                 <div class="precedent-mini-card">
                     <div class="pm-info">
@@ -976,30 +976,30 @@ document.addEventListener("DOMContentLoaded", () => {
             <div class="eval-hero">
                 <div class="eval-stats">
                     <span class="label">Calculated Award</span>
-                    <span class="value">Rs. ${eval.calculated_amount.toLocaleString('en-IN')}</span>
+                    <span class="value">Rs. ${evalData.calculated_amount.toLocaleString('en-IN')}</span>
                 </div>
                 <div class="eval-stats" style="text-align: right;">
                     <span class="label">Precedent Avg</span>
-                    <span class="value" style="color: var(--text-secondary)">Rs. ${eval.average_precedent_award.toLocaleString('en-IN')}</span>
+                    <span class="value" style="color: var(--text-secondary)">Rs. ${evalData.average_precedent_award.toLocaleString('en-IN')}</span>
                 </div>
             </div>
 
             <!-- Alignment and margin -->
             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-                <span class="card-text">Award Margin: <strong>${eval.margin_percent > 0 ? '+':''}${eval.margin_percent}%</strong></span>
-                ${alignLabels[eval.alignment] || ""}
+                <span class="card-text">Award Margin: <strong>${evalData.margin_percent > 0 ? '+':''}${evalData.margin_percent}%</strong></span>
+                ${alignLabels[evalData.alignment] || ""}
             </div>
 
             <!-- Legal recommendation -->
             <div class="eval-desc">
                 <strong><i class="fa-solid fa-gavel"></i> Legal Opinion:</strong><br>
-                ${eval.recommendation}
+                ${evalData.recommendation}
             </div>
 
             <!-- Legal Argument briefs -->
             <div class="eval-desc" style="background: rgba(186, 104, 200, 0.02); border-color: rgba(186, 104, 200, 0.12); margin-top: 8px;">
                 <strong><i class="fa-solid fa-scroll"></i> Court Brief Argument:</strong><br>
-                <em>"${eval.claimant_argument}"</em>
+                <em>"${evalData.claimant_argument}"</em>
             </div>
 
             <!-- Retrieved precedent list -->

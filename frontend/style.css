@@ -1803,6 +1803,260 @@ select.low-confidence-input {
 }
 
 /* ==========================================================================
+   MODAL RESULTS OVERLAY
+   ========================================================================== */
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.35s ease, visibility 0.35s ease;
+}
+
+.modal.open {
+    opacity: 1;
+    visibility: visible;
+}
+
+.modal-content {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-lg);
+    width: 90%;
+    max-width: 720px;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-premium), 0 0 60px rgba(0, 242, 254, 0.08);
+    transform: translateY(30px) scale(0.96);
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow: hidden;
+}
+
+.modal.open .modal-content {
+    transform: translateY(0) scale(1);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border-glass);
+}
+
+.modal-header h2 {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+}
+
+.close-btn {
+    background: transparent;
+    border: none;
+    font-size: 1.5rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.2s ease, transform 0.2s ease;
+    line-height: 1;
+}
+
+.close-btn:hover {
+    color: var(--color-danger);
+    transform: rotate(90deg);
+}
+
+.modal-body {
+    padding: 24px 28px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 16px 28px;
+    border-top: 1px solid var(--border-glass);
+}
+
+/* Results Dashboard Hero */
+.results-dashboard .award-hero .hero-amount {
+    background: linear-gradient(135deg, var(--color-success) 0%, #6ee7b7 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Evaluator badges */
+.eval-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.eval-badge.aligned {
+    background: rgba(52, 211, 153, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.eval-badge.high {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.eval-badge.low {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.eval-hero {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-glass);
+}
+
+.eval-stats .label {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+}
+
+.eval-stats .value {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--color-success);
+}
+
+.eval-desc {
+    margin-top: 12px;
+    padding: 10px 14px;
+    border: 1px solid rgba(0, 242, 254, 0.1);
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    background: rgba(0, 242, 254, 0.02);
+    line-height: 1.5;
+}
+
+/* Precedent mini-cards */
+.precedent-mini-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    margin-top: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-sm);
+    transition: background 0.2s ease;
+}
+
+.precedent-mini-card:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.pm-name {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: block;
+}
+
+.pm-details {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.pm-award {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--color-success);
+    display: block;
+    text-align: right;
+}
+
+.pm-score {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    text-align: right;
+    display: block;
+}
+
+/* Progress bar styles for live metrics */
+.progress-bar-wrapper {
+    width: 100%;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-success) 100%);
+    border-radius: 3px;
+    transition: width 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.progress-bar-fill.bg-danger {
+    background: linear-gradient(90deg, var(--color-warning) 0%, var(--color-danger) 100%);
+}
+
+/* Form OCR Loading Spinner */
+.form-ocr-loader {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: rgba(11, 18, 36, 0.92);
+    backdrop-filter: blur(10px);
+    border-radius: var(--radius-md);
+}
+
+.spinner-glow {
+    width: 48px;
+    height: 48px;
+    border: 3px solid rgba(0, 242, 254, 0.15);
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    animation: spinGlow 0.8s linear infinite;
+}
+
+@keyframes spinGlow {
+    to { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
    FULL-SCREEN WORKSTATION OVERLAY & SLIDE-OVER PANEL STYLE RULES
    ========================================================================== */
 .preview-floating-toolbar {
