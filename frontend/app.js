@@ -1739,9 +1739,8 @@ document.addEventListener("DOMContentLoaded", () => {
         
         triggerEvalBtn.disabled = true;
         currentCalculationAmount = 0;
-        
-        caseTypeSel    // ==========================================================================
-    // DYNAMIC AI LEGAL ASSISTANT SIDE PANEL DRAWER & CHAT
+    });
+
     // ==========================================================================
     const slideover = document.getElementById("right-slideover");
     const closeSlideover = document.getElementById("close-slideover");
