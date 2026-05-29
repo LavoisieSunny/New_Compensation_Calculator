@@ -725,8 +725,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
             const data = await response.json();
             
-            // Remove spinner
-                   if (data.success) {
+            // Remove spinner — always remove after response received
+            loader.remove();
+
+            if (data.success) {
                 // Apply OCR suggestions automatically
                 applyAllOcrSuggestions(data.suggestions);
 
@@ -1955,5 +1957,4 @@ document.addEventListener("DOMContentLoaded", () => {
     if (printBtn) {
         printBtn.addEventListener("click", () => { window.print(); });
     }
-});> { window.print(); });
 });
