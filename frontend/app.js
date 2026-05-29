@@ -15,6 +15,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let uploadedFileObjects = {}; // Maps filename -> File object for local blob previews
     let isPolling = false;
     let currentCalculationAmount = 0;
+    let currentOcrRawText = []; // Recover raw text from the last successful single OCR
     
     // --- DOM REFERENCES ---
     const navItems = document.querySelectorAll(".nav-item");
@@ -40,6 +41,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const singlePreviewCard = document.getElementById("single-preview-card");
     const singlePreviewContainer = document.getElementById("single-preview-container");
     const singlePreviewFilename = document.getElementById("single-preview-filename");
+    const aiExtractBtn = document.getElementById("ai-extract-btn");
     
     // Age & Dates
     const dobInput = document.getElementById("date-of-birth");
@@ -203,10 +205,137 @@ document.addEventListener("DOMContentLoaded", () => {
         const titleMap = {
             calculator: "Motor Claims Compensation Workstation",
             library: "Centralized PDF Library & Qdrant Queue",
-            chat: "AI Precedent Assistant & Semantic Search"
+            chat: "AI Precedent Assistant & Semantic Search",
+            qdrant: "Qdrant Vector Database Explorer Dashboard"
         };
         tabTitleText.textContent = titleMap[tabName] || "Compensation Calculator Workstation";
+        
+        // Trigger dashboard reload when viewing Qdrant DB Explorer
+        if (tabName === "qdrant") {
+            loadQdrantDashboard();
+        }
     }
+
+    // ==========================================================================
+    // EMBEDDED QDRANT OFFICIAL UI DASHBOARD EXPLORER
+    // ==========================================================================
+    const qdrantPointsTableBody = document.getElementById("qdrant-points-table-body");
+    const qdrantCollectionName = document.getElementById("qdrant-collection-name");
+    const qdrantPointsCount = document.getElementById("qdrant-points-count");
+    const qdrantDistance = document.getElementById("qdrant-distance");
+    const qdrantVectorSize = document.getElementById("qdrant-vector-size");
+    const refreshQdrantBtn = document.getElementById("refresh-qdrant-btn");
+    
+    const payloadModal = document.getElementById("qdrant-payload-modal");
+    const closePayloadModalBtn = document.getElementById("close-payload-modal-btn");
+    const dismissPayloadModalBtn = document.getElementById("dismiss-payload-modal-btn");
+    const payloadCodeblock = document.getElementById("qdrant-payload-codeblock");
+
+    if (refreshQdrantBtn) {
+        refreshQdrantBtn.addEventListener("click", loadQdrantDashboard);
+    }
+
+    async function loadQdrantDashboard() {
+        if (!qdrantPointsTableBody) return;
+        
+        qdrantPointsTableBody.innerHTML = `
+            <tr>
+                <td colspan="5" style="padding: 24px; text-align: center; color: var(--text-secondary);">
+                    <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--color-primary); margin-bottom: 8px;"></i>
+                    Scrolling points and loading vectors from local Qdrant collection...
+                </td>
+            </tr>
+        `;
+
+        try {
+            const response = await fetch("/api/qdrant/points");
+            if (!response.ok) throw new Error("Failed to load Qdrant points");
+            const data = await response.json();
+
+            // Populate cards
+            if (qdrantCollectionName) qdrantCollectionName.textContent = data.collection_name || "legal_documents";
+            if (qdrantPointsCount) qdrantPointsCount.textContent = data.points_count !== undefined ? data.points_count : 0;
+            if (qdrantDistance) qdrantDistance.textContent = data.distance || "Cosine";
+            if (qdrantVectorSize) qdrantVectorSize.textContent = data.vector_size ? `${data.vector_size} dims` : "384 dims";
+
+            if (!data.points || data.points.length === 0) {
+                qdrantPointsTableBody.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="padding: 24px; text-align: center; color: var(--text-muted);">
+                            <i class="fa-solid fa-box-open" style="font-size: 1.8rem; display: block; margin-bottom: 8px;"></i>
+                            No vectors currently indexed in the Qdrant database collection.<br>
+                            <span style="font-size: 0.75rem; color: var(--text-muted); opacity: 0.7;">Drop a legal case PDF in the workstation to auto-OCR & populate vectors!</span>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            qdrantPointsTableBody.innerHTML = "";
+            data.points.forEach(point => {
+                const tr = document.createElement("tr");
+                tr.style.cssText = "border-bottom: 1px solid var(--border-glass); transition: background 0.2s ease;";
+                
+                // Highlight row on hover
+                tr.addEventListener("mouseenter", () => tr.style.background = "rgba(255, 255, 255, 0.01)");
+                tr.addEventListener("mouseleave", () => tr.style.background = "transparent");
+
+                const payload = point.payload || {};
+                const filename = payload.filename || "unknown";
+                const chunkId = payload.chunk_id !== undefined ? payload.chunk_id : 0;
+                let text = payload.text || "";
+                if (text.length > 75) {
+                    text = text.slice(0, 72) + "...";
+                }
+
+                tr.innerHTML = `
+                    <td style="padding: 12px 16px; font-family: monospace; color: var(--color-primary); font-size: 0.8rem;">${point.id}</td>
+                    <td style="padding: 12px 16px; font-weight: 500;">${filename}</td>
+                    <td style="padding: 12px 16px; text-align: center;"><span class="badge tech-badge" style="padding: 2px 6px;"># ${chunkId}</span></td>
+                    <td style="padding: 12px 16px; color: var(--text-secondary); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">"${text}"</td>
+                    <td style="padding: 12px 16px; text-align: right;">
+                        <button type="button" class="btn btn-secondary btn-small view-payload-btn" data-point-id="${point.id}">
+                            <i class="fa-solid fa-code"></i> Payload
+                        </button>
+                    </td>
+                `;
+
+                // Bind payload detail viewer
+                tr.querySelector(".view-payload-btn").addEventListener("click", () => {
+                    if (payloadCodeblock && payloadModal) {
+                        payloadCodeblock.textContent = JSON.stringify(payload, null, 4);
+                        payloadModal.classList.add("open");
+                    }
+                });
+
+                qdrantPointsTableBody.appendChild(tr);
+            });
+
+        } catch (error) {
+            console.error("Qdrant Explorer error:", error);
+            qdrantPointsTableBody.innerHTML = `
+                <tr>
+                    <td colspan="5" style="padding: 24px; text-align: center; color: var(--color-danger);">
+                        <i class="fa-solid fa-triangle-exclamation" style="font-size: 1.8rem; display: block; margin-bottom: 8px;"></i>
+                        Failed to read points from Qdrant: ${error.message}
+                    </td>
+                </tr>
+            `;
+        }
+    }
+
+    // Modal controls for payload explorer
+    if (closePayloadModalBtn) {
+        closePayloadModalBtn.addEventListener("click", () => payloadModal.classList.remove("open"));
+    }
+    if (dismissPayloadModalBtn) {
+        dismissPayloadModalBtn.addEventListener("click", () => payloadModal.classList.remove("open"));
+    }
+    window.addEventListener("click", (e) => {
+        if (e.target === payloadModal) {
+            payloadModal.classList.remove("open");
+        }
+    });
 
     // ==========================================================================
     // BACKEND HEALTH & QDRANT CONNECTOR
@@ -594,11 +723,19 @@ document.addEventListener("DOMContentLoaded", () => {
             const data = await response.json();
             
             // Remove spinner
-            loader.remove();
-
-            if (data.success) {
+                   if (data.success) {
                 // Apply OCR suggestions automatically
                 applyAllOcrSuggestions(data.suggestions);
+
+                // Store raw text for AI data recovery
+                currentOcrRawText = data.raw_text || [];
+                if (aiExtractBtn) {
+                    if (currentOcrRawText.length > 0) {
+                        aiExtractBtn.style.display = "inline-flex";
+                    } else {
+                        aiExtractBtn.style.display = "none";
+                    }
+                }
 
                 // Load high-fidelity PDF preview in the right pane!
                 const blobUrl = URL.createObjectURL(file);
@@ -794,6 +931,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             });
         });
+
+        // Sync chatbot document filter select options
+        syncChatDocumentFilter();
     }
 
     // High-Fidelity local Blob URL previewing
@@ -938,6 +1078,77 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // ==========================================================================
+    // AI DATA RECOVERY (LLM OPTIMIZED PARSING EXTRACTION)
+    // ==========================================================================
+    if (aiExtractBtn) {
+        aiExtractBtn.addEventListener("click", async () => {
+            if (!currentOcrRawText || currentOcrRawText.length === 0) {
+                showToast("No raw OCR text available. Please upload a PDF first.", "warning");
+                return;
+            }
+
+            // Show loading spinner
+            const formPanel = document.querySelector("#tab-calculator .panel.scroll-y");
+            const loader = document.createElement("div");
+            loader.className = "form-ocr-loader";
+            loader.innerHTML = `
+                <div class="spinner-glow"></div>
+                <p>AI Legal LLM is parsing text...</p>
+                <span style="font-size: 0.8rem; color: var(--text-secondary); opacity: 0.8;">Recovering missing legal compensation entities</span>
+            `;
+            formPanel.style.position = "relative";
+            formPanel.appendChild(loader);
+
+            try {
+                const response = await fetch("/api/ocr/ai-recover", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ raw_text: currentOcrRawText })
+                });
+
+                loader.remove();
+
+                if (!response.ok) throw new Error("AI recovery API returned error status");
+                const data = await response.json();
+
+                if (data.success) {
+                    applyAllOcrSuggestions(data.suggestions);
+                    showToast("AI data extraction complete! All recovered parameters auto-filled into form.", "success");
+                } else {
+                    showToast("AI extraction failed to extract fields.", "error");
+                }
+            } catch (error) {
+                loader.remove();
+                console.error("AI recovery failed:", error);
+                showToast(`AI extraction failed: ${error.message}`, "error");
+            }
+        });
+    }
+
+    function syncChatDocumentFilter() {
+        const chatDocumentFilter = document.getElementById("chat-document-filter");
+        if (!chatDocumentFilter) return;
+        
+        const currentSelection = chatDocumentFilter.value;
+        
+        chatDocumentFilter.innerHTML = '<option value="all">All Documents</option>';
+        
+        const indexedFiles = fileQueue.filter(f => f.status === "indexed").map(f => f.filename);
+        
+        const uniqueFiles = [...new Set(indexedFiles)];
+        uniqueFiles.forEach(filename => {
+            const opt = document.createElement("option");
+            opt.value = filename;
+            opt.textContent = filename;
+            chatDocumentFilter.appendChild(opt);
+        });
+        
+        if (uniqueFiles.includes(currentSelection)) {
+            chatDocumentFilter.value = currentSelection;
+        }
+    }
+
+    // ==========================================================================
     // AI PRECEDENTS SEARCH & CHAT (TAB 3)
     // ==========================================================================
     chatSendBtn.addEventListener("click", handleChatSend);
@@ -957,13 +1168,21 @@ document.addEventListener("DOMContentLoaded", () => {
         const loadingId = appendChatBubble(`<i class="fa-solid fa-spinner fa-spin"></i> Semantic AI searching Qdrant database...`, "bot", true);
 
         try {
-            const response = await fetch("/api/search/chat", {
+            const payload = {
+                message: query,
+                case_type: chatCaseFilter.value
+            };
+            
+            const chatDocumentFilter = document.getElementById("chat-document-filter");
+            const docFilterVal = chatDocumentFilter ? chatDocumentFilter.value : "all";
+            if (docFilterVal !== "all") {
+                payload.filename = docFilterVal;
+            }
+
+            const response = await fetch("/api/chat/pdf", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    message: query,
-                    case_type: chatCaseFilter.value
-                })
+                body: JSON.stringify(payload)
             });
 
             if (!response.ok) throw new Error("Search API failure");
@@ -1521,71 +1740,188 @@ document.addEventListener("DOMContentLoaded", () => {
         triggerEvalBtn.disabled = true;
         currentCalculationAmount = 0;
         
-        caseTypeSelect.value = "";
-    });
-
-    // ==========================================================================
-    // FLOATING TOOLBAR & SLIDE-OVER OVERLAY CONTROLLER
+        caseTypeSel    // ==========================================================================
+    // DYNAMIC AI LEGAL ASSISTANT SIDE PANEL DRAWER & CHAT
     // ==========================================================================
     const slideover = document.getElementById("right-slideover");
-    const slideoverTitle = document.getElementById("slideover-title");
     const closeSlideover = document.getElementById("close-slideover");
-    const toolbarButtons = document.querySelectorAll(".floating-tool-btn");
-    const tabContents = document.querySelectorAll(".slideover-tab-content");
+    const aiAssistantTrigger = document.getElementById("ai-assistant-trigger");
+    
+    const assistantChatMessages = document.getElementById("assistant-chat-messages");
+    const assistantChatInput = document.getElementById("assistant-chat-input");
+    const assistantChatSendBtn = document.getElementById("assistant-chat-send-btn");
 
-    const tabTitleMapping = {
-        "summary": "AI Legal Summary Briefing",
-        "table": "Extracted Compensation Table",
-        "heuristics": "Dynamic Legal Heuristics",
-        "benchmarks": "Qdrant Precedents Benchmark"
-    };
-
-    const tabIdMapping = {
-        "summary": "legal-ai-summary-card",
-        "table": "compensation-table-card",
-        "heuristics": "live-metrics-card",
-        "benchmarks": "evaluator-card"
-    };
-
-    toolbarButtons.forEach(btn => {
-        btn.addEventListener("click", () => {
-            const targetPanel = btn.getAttribute("data-panel");
-            const targetCardId = tabIdMapping[targetPanel];
-
-            // If the panel is already open and we clicked the same button, close it
-            if (btn.classList.contains("active") && slideover.classList.contains("open")) {
+    if (aiAssistantTrigger) {
+        aiAssistantTrigger.addEventListener("click", () => {
+            if (aiAssistantTrigger.classList.contains("active") && slideover.classList.contains("open")) {
                 closeDrawer();
                 return;
             }
-
-            // Set active states on buttons
-            toolbarButtons.forEach(b => b.classList.remove("active"));
-            btn.classList.add("active");
-
-            // Update slide-over title
-            slideoverTitle.textContent = tabTitleMapping[targetPanel] || "Information Desk";
-
-            // Switch tab content visibility inside slideover
-            tabContents.forEach(content => {
-                if (content.getAttribute("id") === targetCardId) {
-                    content.classList.remove("tab-hidden");
-                } else {
-                    content.classList.add("tab-hidden");
-                }
-            });
-
-            // Open drawer
+            
+            aiAssistantTrigger.classList.add("active");
             slideover.classList.add("open");
+            
+            // Auto generate CASE BRIEF on open
+            generateCaseBrief();
         });
-    });
+    }
 
     function closeDrawer() {
         if (slideover) slideover.classList.remove("open");
-        toolbarButtons.forEach(b => b.classList.remove("active"));
+        if (aiAssistantTrigger) aiAssistantTrigger.classList.remove("active");
     }
 
     if (closeSlideover) {
         closeSlideover.addEventListener("click", closeDrawer);
+    }
+
+    // Generate formatted Case Brief automatically based on workstation inputs
+    function generateCaseBrief() {
+        const caseType = caseTypeSelect.value || "N/A";
+        const caseTypeLabel = caseType === "death" ? "Death Claim" : (caseType === "injury" ? "Injury Claim" : "N/A");
+        
+        const claimantName = document.getElementById("name")?.value || "N/A";
+        const respondentName = "Insurance Company / Respondent"; 
+        const ageVal = ageInput.value ? `${ageInput.value} years` : "N/A";
+        const monthlyIncome = parseFloat(monthlyIncomeInput.value) || 0;
+        const incomeVal = monthlyIncome > 0 ? formatCurrency(monthlyIncome) : "N/A";
+        
+        const disabilityInput = document.getElementById("disability");
+        const disabilityVal = (caseType === "injury" && disabilityInput && disabilityInput.value) ? `${disabilityInput.value}%` : "N/A";
+        
+        const awardAmountVal = currentCalculationAmount > 0 ? formatCurrency(currentCalculationAmount) : "N/A";
+        const statusVal = currentCalculationAmount > 0 ? "Calculated (Deterministic Math)" : "Awaiting Mathematical Input";
+        
+        const occupationVal = "Salaried / Self-Employed"; 
+
+        const contentEl = document.getElementById("assistant-case-brief-content");
+        if (contentEl) {
+            contentEl.innerHTML = `
+                <table style="width:100%; border-collapse:collapse; font-size:0.8rem; line-height:1.6;">
+                    <tr><td style="padding:4px 0; color:var(--text-muted);">Case Type:</td><td style="padding:4px 0; text-align:right; font-weight:600; color:var(--text-primary);">${caseTypeLabel}</td></tr>
+                    <tr><td style="padding:4px 0; color:var(--text-muted);">Claimant:</td><td style="padding:4px 0; text-align:right; font-weight:600; color:var(--text-primary);">${claimantName}</td></tr>
+                    <tr><td style="padding:4px 0; color:var(--text-muted);">Respondent:</td><td style="padding:4px 0; text-align:right; font-weight:600; color:var(--text-primary);">${respondentName}</td></tr>
+                    <tr><td style="padding:4px 0; color:var(--text-muted);">Age:</td><td style="padding:4px 0; text-align:right; font-weight:600; color:var(--text-primary);">${ageVal}</td></tr>
+                    <tr><td style="padding:4px 0; color:var(--text-muted);">Occupation:</td><td style="padding:4px 0; text-align:right; font-weight:600; color:var(--text-primary);">${occupationVal}</td></tr>
+                    <tr><td style="padding:4px 0; color:var(--text-muted);">Income:</td><td style="padding:4px 0; text-align:right; font-weight:600; color:var(--text-primary);">${incomeVal}</td></tr>
+                    <tr><td style="padding:4px 0; color:var(--text-muted);">Disability:</td><td style="padding:4px 0; text-align:right; font-weight:600; color:var(--text-primary);">${disabilityVal}</td></tr>
+                    <tr><td style="padding:4px 0; color:var(--text-muted);">Award Amount:</td><td style="padding:4px 0; text-align:right; font-weight:700; color:var(--color-success);">${awardAmountVal}</td></tr>
+                    <tr><td style="padding:4px 0; color:var(--text-muted);">Status:</td><td style="padding:4px 0; text-align:right; font-weight:600; color:${currentCalculationAmount > 0 ? '#34d399' : '#f59e0b'};">${statusVal}</td></tr>
+                </table>
+            `;
+        }
+    }
+
+    // Bind Suggested Question Pills immediately
+    document.querySelectorAll(".suggested-question-pill").forEach(pill => {
+        pill.addEventListener("click", () => {
+            const questionText = pill.getAttribute("data-question");
+            if (assistantChatInput) {
+                assistantChatInput.value = questionText;
+                handleAssistantChatSend();
+            }
+        });
+    });
+
+    // Side panel chat submission
+    if (assistantChatSendBtn) {
+        assistantChatSendBtn.addEventListener("click", handleAssistantChatSend);
+    }
+    if (assistantChatInput) {
+        assistantChatInput.addEventListener("keypress", (e) => {
+            if (e.key === "Enter") handleAssistantChatSend();
+        });
+    }
+
+    async function handleAssistantChatSend() {
+        const query = assistantChatInput.value.trim();
+        if (!query) return;
+
+        appendAssistantChatBubble(query, "user");
+        assistantChatInput.value = "";
+
+        const loadingId = appendAssistantChatBubble(`<i class="fa-solid fa-spinner fa-spin"></i> Auditing workstation state & searching precedents...`, "bot", true);
+
+        try {
+            // Retrieve current workstation inputs for full LLM validation context (Phase 8 integration)
+            const caseType = caseTypeSelect.value;
+            const parsedFields = {
+                case_type: caseType,
+                name: document.getElementById("name")?.value || "",
+                father_name: document.getElementById("father-name")?.value || "",
+                age: parseInt(ageInput.value) || 0,
+                monthly_income: parseFloat(monthlyIncomeInput.value) || 0,
+                disability: parseFloat(document.getElementById("disability")?.value) || 0,
+                dependents: parseInt(dependentsInput.value) || 0,
+                marital_status: maritalStatusSelect.value || "married"
+            };
+
+            const calculatorResult = {
+                case_type: caseType,
+                final_amount: currentCalculationAmount,
+                total_compensation: currentCalculationAmount
+            };
+
+            // Identify current active PDF filename
+            let filename = null;
+            if (singlePreviewFilename && singlePreviewFilename.innerHTML) {
+                const parts = singlePreviewFilename.innerHTML.split("<span");
+                if (parts.length > 0) {
+                    filename = parts[0].trim();
+                }
+            }
+
+            const payload = {
+                question: query,
+                filename: (filename && filename !== "No File Loaded") ? filename : null,
+                ocr_text: currentOcrRawText ? currentOcrRawText.join("\n") : "",
+                parsed_fields: parsedFields,
+                calculator_result: calculatorResult
+            };
+
+            const response = await fetch("/api/chat/pdf", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) throw new Error("Assistant API returned error");
+            const data = await response.json();
+
+            document.getElementById(loadingId).remove();
+            appendAssistantChatBubble(data.response, "bot");
+
+        } catch (error) {
+            console.error("AI Legal Assistant error:", error);
+            document.getElementById(loadingId).remove();
+            appendAssistantChatBubble("I apologize, but I encountered an error auditing the workstation state. Please ensure the local Ollama service is running.", "bot");
+        }
+    }
+
+    function appendAssistantChatBubble(text, sender, isLoader = false) {
+        const bubble = document.createElement("div");
+        const id = `ast_msg_${Date.now()}`;
+        bubble.id = id;
+        bubble.className = `chat-bubble ${sender}`;
+        
+        const avatarHtml = sender === "bot" ? `<i class="fa-solid fa-robot"></i>` : `<i class="fa-solid fa-user-tie"></i>`;
+        
+        let formattedText = text;
+        if (!isLoader && sender === "bot" && !text.includes("<ul") && !text.includes("<table")) {
+            formattedText = text
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/\n/g, '<br>');
+        }
+
+        bubble.innerHTML = `
+            <div class="chat-avatar">${avatarHtml}</div>
+            <div class="chat-text" style="flex: 1; min-width: 0; overflow-wrap: break-word; font-size: 0.85rem; line-height: 1.5;">${formattedText}</div>
+        `;
+        
+        assistantChatMessages.appendChild(bubble);
+        assistantChatMessages.scrollTop = assistantChatMessages.scrollHeight;
+        return id;
     }
 
     // Escape key listener to close drawer
@@ -1595,15 +1931,14 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Explicit Calculate Button Click Handler & Logger (Task 1 & Task 2)
+    // Explicit Calculate Button Click Handler & Logger
     const calculateBtn = document.getElementById("calculate-btn");
     if (calculateBtn) {
-        console.log("CALCULATE BUTTON FOUND");
         calculateBtn.addEventListener("click", (e) => {
-            console.log("CALCULATE CLICKED");
             compensationForm.dispatchEvent(new Event("submit"));
         });
     }
 
     printBtn.addEventListener("click", () => { window.print(); });
+});> { window.print(); });
 });

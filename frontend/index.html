@@ -38,6 +38,18 @@
                     <i class="fa-solid fa-calculator-simple"></i>
                     <span>Workstation</span>
                 </button>
+                <button type="button" class="nav-item" data-tab="library">
+                    <i class="fa-solid fa-folder-open"></i>
+                    <span>PDF Library</span>
+                </button>
+                <button type="button" class="nav-item" data-tab="chat">
+                    <i class="fa-solid fa-comments"></i>
+                    <span>AI Precedent Chat</span>
+                </button>
+                <button type="button" class="nav-item" data-tab="qdrant">
+                    <i class="fa-solid fa-database"></i>
+                    <span>Qdrant DB Explorer</span>
+                </button>
             </nav>
 
             <div class="sidebar-footer">
@@ -392,9 +404,14 @@
                         
                         <!-- High-Fidelity PDF Preview Panel -->
                         <div class="card preview-card" id="single-preview-card" style="height: 100%; width: 100%; margin: 0; padding: 16px; display: flex; flex-direction: column; border: none; border-radius: 0;">
-                            <div class="card-header" style="padding-bottom: 8px; margin-bottom: 8px;">
-                                <h3><i class="fa-solid fa-eye text-glow"></i> Case PDF Preview</h3>
-                                <span id="single-preview-filename" class="badge tech-badge">No File Loaded</span>
+                            <div class="card-header" style="padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <h3><i class="fa-solid fa-eye text-glow"></i> Case PDF Preview</h3>
+                                    <span id="single-preview-filename" class="badge tech-badge">No File Loaded</span>
+                                </div>
+                                <button type="button" id="ai-extract-btn" class="btn btn-small btn-secondary" style="font-size: 0.72rem; padding: 4px 8px; display: none;">
+                                    <i class="fa-solid fa-wand-magic-sparkles"></i> Ask LLM to Extract
+                                </button>
                             </div>
                             <div class="single-preview-container" id="single-preview-container" style="flex: 1; border: 1px solid var(--border-glass); border-radius: var(--radius-sm); overflow: hidden; background: rgba(0, 0, 0, 0.2);">
                                 <div class="preview-empty-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 10px; opacity: 0.5;">
@@ -406,17 +423,8 @@
 
                         <!-- Floating Tool Buttons -->
                         <div class="preview-floating-toolbar" id="preview-floating-toolbar">
-                            <button type="button" class="floating-tool-btn" data-panel="summary" title="AI Summary Briefing">
-                                <i class="fa-solid fa-scroll"></i>
-                            </button>
-                            <button type="button" class="floating-tool-btn" data-panel="table" title="Compensation Table">
-                                <i class="fa-solid fa-table-list"></i>
-                            </button>
-                            <button type="button" class="floating-tool-btn" data-panel="heuristics" title="Live Metrics Heuristics">
-                                <i class="fa-solid fa-chart-line"></i>
-                            </button>
-                            <button type="button" class="floating-tool-btn" data-panel="benchmarks" title="Qdrant Benchmarks">
-                                <i class="fa-solid fa-scale-balanced"></i>
+                            <button type="button" class="floating-tool-btn" id="ai-assistant-trigger" title="🤖 AI Legal Assistant">
+                                <i class="fa-solid fa-robot"></i>
                             </button>
                         </div>
 
@@ -489,7 +497,11 @@
                             <h3><i class="fa-solid fa-brain-circuit text-glow"></i> AI Precedent Chat Assistant</h3>
                             <p class="panel-subtitle">Runs semantic legal searches over your centralized Qdrant vector database.</p>
                         </div>
-                        <div class="chat-filters">
+                        <div class="chat-filters" style="display: flex; gap: 8px;">
+                            <select id="chat-document-filter" class="btn btn-secondary btn-small">
+                                <option value="all">All Documents</option>
+                                <!-- Dynamically populated indexed files -->
+                            </select>
                             <select id="chat-case-filter" class="btn btn-secondary btn-small">
                                 <option value="all">Search All Cases</option>
                                 <option value="injury">Injury Cases Only</option>
@@ -526,6 +538,69 @@
                 </div>
             </div>
 
+            <!-- TAB 4: QDRANT VECTOR DB EXPLORER (OFFICIAL DASHBOARD EMULATION) -->
+            <div id="tab-qdrant" class="tab-viewport">
+                <div class="panel qdrant-explorer-panel scroll-y">
+                    <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-glass); padding-bottom: 15px;">
+                        <div>
+                            <h3><i class="fa-solid fa-database text-glow-green" style="color: #34d399;"></i> Qdrant Collection Dashboard</h3>
+                            <p class="panel-subtitle">Visual point and vector payload explorer matching the official Qdrant Dashboard.</p>
+                        </div>
+                        <button type="button" id="refresh-qdrant-btn" class="btn btn-secondary btn-small">
+                            <i class="fa-solid fa-rotate"></i> Refresh Collection
+                        </button>
+                    </div>
+
+                    <!-- Meta cards / Stats row -->
+                    <div class="qdrant-stats-row" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 15px 0;">
+                        <div class="qdrant-stat-card" style="background: rgba(10, 15, 30, 0.45); border: 1px solid var(--border-glass); border-radius: var(--radius-sm); padding: 16px; text-align: center;">
+                            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 4px;">Collection</span>
+                            <strong style="font-size: 1.15rem; color: var(--text-primary);" id="qdrant-collection-name">legal_documents</strong>
+                        </div>
+                        <div class="qdrant-stat-card" style="background: rgba(10, 15, 30, 0.45); border: 1px solid var(--border-glass); border-radius: var(--radius-sm); padding: 16px; text-align: center;">
+                            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 4px;">Total Points Count</span>
+                            <strong style="font-size: 1.6rem; color: var(--color-success);" id="qdrant-points-count">0</strong>
+                        </div>
+                        <div class="qdrant-stat-card" style="background: rgba(10, 15, 30, 0.45); border: 1px solid var(--border-glass); border-radius: var(--radius-sm); padding: 16px; text-align: center;">
+                            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 4px;">Distance Metric</span>
+                            <strong style="font-size: 1.15rem; color: var(--color-primary);" id="qdrant-distance">Cosine</strong>
+                        </div>
+                        <div class="qdrant-stat-card" style="background: rgba(10, 15, 30, 0.45); border: 1px solid var(--border-glass); border-radius: var(--radius-sm); padding: 16px; text-align: center;">
+                            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 4px;">Vector Size</span>
+                            <strong style="font-size: 1.15rem; color: var(--text-primary);" id="qdrant-vector-size">384 dims</strong>
+                        </div>
+                    </div>
+
+                    <!-- Points listing -->
+                    <div style="border-top: 1px solid var(--border-glass); padding-top: 20px;">
+                        <h4 style="font-family: 'Outfit', sans-serif; font-size: 0.95rem; margin-bottom: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 8px;"><i class="fa-solid fa-list-ul"></i> Indexed Collection Points</h4>
+                        
+                        <div class="qdrant-table-wrapper" style="overflow-x: auto; background: rgba(0, 0, 0, 0.25); border-radius: var(--radius-sm); border: 1px solid var(--border-glass);">
+                            <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem;">
+                                <thead>
+                                    <tr style="border-bottom: 1px solid var(--border-glass); background: rgba(255, 255, 255, 0.02); color: var(--text-secondary);">
+                                        <th style="padding: 12px 16px; font-weight: 600;">Point ID</th>
+                                        <th style="padding: 12px 16px; font-weight: 600;">Document Name</th>
+                                        <th style="padding: 12px 16px; font-weight: 600;">Chunk ID</th>
+                                        <th style="padding: 12px 16px; font-weight: 600;">Text Extract</th>
+                                        <th style="padding: 12px 16px; font-weight: 600; text-align: right;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="qdrant-points-table-body">
+                                    <!-- Populated dynamically -->
+                                    <tr>
+                                        <td colspan="5" style="padding: 24px; text-align: center; color: var(--text-muted);">
+                                            <i class="fa-solid fa-box-open" style="font-size: 1.8rem; display: block; margin-bottom: 8px;"></i>
+                                            No points currently indexed in Qdrant collection.
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div>
 
         <!-- ==========================================
@@ -555,88 +630,86 @@
             </div>
         </div>
 
+        <!-- ==========================================
+             QDRANT PAYLOAD DETAIL VIEW MODAL
+             ========================================== -->
+        <div id="qdrant-payload-modal" class="modal">
+            <div class="modal-content" style="max-width: 650px;">
+                <div class="modal-header">
+                    <h2><i class="fa-solid fa-code text-glow"></i> Point Payload Details (JSON)</h2>
+                    <button type="button" id="close-payload-modal-btn" class="close-btn">&times;</button>
+                </div>
+                <div class="modal-body" style="padding: 20px;">
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">This JSON represents the exact key-value metadata payload stored alongside the vector inside the Qdrant database collection:</p>
+                    <pre id="qdrant-payload-codeblock" style="background: rgba(10, 15, 30, 0.9); color: #34d399; padding: 18px; border-radius: var(--radius-sm); font-family: monospace; font-size: 0.8rem; overflow-x: auto; border: 1px solid var(--border-glass); max-height: 400px; text-align: left;"></pre>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" id="dismiss-payload-modal-btn" class="btn btn-primary">Close Details</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Slide-over Drawer Panel -->
         <div id="right-slideover" class="slideover-panel">
             <div class="slideover-header">
-                <h3 id="slideover-title">Information Desk</h3>
+                <h3 id="slideover-title">🤖 AI Legal Assistant</h3>
                 <button type="button" id="close-slideover" class="slideover-close-btn">&times;</button>
             </div>
-            <div class="slideover-body">
+            <div class="slideover-body" style="height: calc(100% - 70px); padding: 20px; display: flex; flex-direction: column; gap: 15px; overflow-y: auto;">
                 
-                <!-- SUMMARY CARD -->
-                <div id="legal-ai-summary-card" class="card slideover-tab-content tab-hidden">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-scroll text-purple"></i> AI Legal Summary</h3>
+                <!-- 1. Case Brief Panel -->
+                <div class="assistant-case-brief-card" id="assistant-case-brief-card">
+                    <div style="font-family: 'Outfit', sans-serif; font-weight: 700; color: var(--color-primary); font-size: 0.9rem; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+                        <i class="fa-solid fa-briefcase"></i> Automatic Case Brief
                     </div>
-                    <div id="legal-ai-summary-body" class="card-body">
-                        <div class="empty-summary-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; opacity: 0.5; padding: 20px 0;">
-                            <i class="fa-solid fa-gavel" style="font-size: 2.5rem; color: #c084fc;"></i>
-                            <p style="font-size: 0.8rem; color: var(--text-secondary); text-align: center; margin: 0;">Upload a PDF to see the structured legal analysis summary and judicial anomaly checklist.</p>
-                        </div>
+                    <div id="assistant-case-brief-content" style="font-size: 0.8rem; line-height: 1.5; color: var(--text-secondary);">
+                        Awaiting judgment PDF upload or workstation variables...
                     </div>
                 </div>
 
-                <!-- TABLE CARD -->
-                <div id="compensation-table-card" class="card slideover-tab-content tab-hidden">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-table-list text-green"></i> Extracted Compensation</h3>
+                <!-- 2. Suggested Questions Grid -->
+                <div id="assistant-suggested-section" style="margin-bottom: 5px;">
+                    <div style="font-family: 'Outfit', sans-serif; font-weight: 700; color: var(--text-secondary); font-size: 0.82rem; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
+                        Suggested Questions
                     </div>
-                    <div id="compensation-table-body" class="card-body">
-                        <div class="empty-table-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; opacity: 0.5; padding: 20px 0;">
-                            <i class="fa-solid fa-table-list" style="font-size: 2.5rem; color: #34d399;"></i>
-                            <p style="font-size: 0.8rem; color: var(--text-secondary); text-align: center; margin: 0;">Upload a PDF to view the detailed breakdown of the judicial award heads.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- LIVE METRICS CARD -->
-                <div id="live-metrics-card" class="card slideover-tab-content tab-hidden">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-chart-line text-glow"></i> Live Multiplier Metrics</h3>
-                    </div>
-                    <div id="live-metrics-body" class="card-body">
-                        <div class="metric-row" id="live-age-item" style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass); align-items: center;">
-                            <span class="metric-label" style="font-size: 0.72rem;">Age</span>
-                            <span id="live-age" class="metric-value" style="font-size: 1.1rem;">—</span>
-                        </div>
-                        <div class="metric-row" id="live-multiplier-item" style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass); align-items: center;">
-                            <span class="metric-label" style="font-size: 0.72rem;">Sarla Verma Multiplier</span>
-                            <span id="live-multiplier" class="metric-value" style="font-size: 1.1rem;">—</span>
-                        </div>
-                        <div class="metric-row" id="live-prospects-item" style="display: flex; flex-direction: column; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <span class="metric-label" style="font-size: 0.72rem;">Future Prospects</span>
-                                <span id="live-prospects" class="metric-value" style="font-size: 1.1rem;">—%</span>
-                            </div>
-                            <div class="progress-bar-wrapper" style="margin-top: 4px;">
-                                <div id="live-prospects-bar" class="progress-bar-fill" style="width: 0%"></div>
-                            </div>
-                        </div>
-                        <div class="metric-row" id="live-deductions-item" style="display: flex; flex-direction: column; padding: 6px 0;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <span class="metric-label" style="font-size: 0.72rem;">Deductions</span>
-                                <span id="live-deductions" class="metric-value" style="font-size: 1.1rem;">—%</span>
-                            </div>
-                            <div class="progress-bar-wrapper" style="margin-top: 4px;">
-                                <div id="live-deductions-bar" class="progress-bar-fill bg-danger" style="width: 0%"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- EVALUATOR CARD -->
-                <div id="evaluator-card" class="card slideover-tab-content tab-hidden">
-                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                        <h3><i class="fa-solid fa-scale-balanced text-glow-purple"></i> Qdrant Precedent Benchmark</h3>
-                        <button type="button" id="trigger-eval-btn" class="btn btn-small btn-secondary" style="font-size: 0.72rem; padding: 4px 8px;" disabled>
-                            <i class="fa-solid fa-gavel"></i> Benchmark
+                    <div class="assistant-suggested-grid">
+                        <button type="button" class="suggested-question-pill" data-question="Summarize this case">
+                            <i class="fa-solid fa-circle-question"></i> Summarize this case
+                        </button>
+                        <button type="button" class="suggested-question-pill" data-question="Is compensation correct?">
+                            <i class="fa-solid fa-circle-question"></i> Is compensation correct?
+                        </button>
+                        <button type="button" class="suggested-question-pill" data-question="Explain multiplier selection">
+                            <i class="fa-solid fa-circle-question"></i> Explain multiplier selection
+                        </button>
+                        <button type="button" class="suggested-question-pill" data-question="What compensation heads are included?">
+                            <i class="fa-solid fa-circle-question"></i> What compensation heads are included?
+                        </button>
+                        <button type="button" class="suggested-question-pill" data-question="Can compensation be enhanced?">
+                            <i class="fa-solid fa-circle-question"></i> Can compensation be enhanced?
+                        </button>
+                        <button type="button" class="suggested-question-pill" data-question="What precedents were cited?">
+                            <i class="fa-solid fa-circle-question"></i> What precedents were cited?
                         </button>
                     </div>
-                    <div id="evaluator-card-body" class="card-body">
-                        <div class="empty-state" style="padding: 10px 0;">
-                            <i class="fa-solid fa-info-circle"></i>
-                            <p style="font-size: 0.78rem;">Click "Benchmark" to compare calculated compensation against Qdrant precedents.</p>
+                </div>
+
+                <!-- 3. Unified AI Chat Interface -->
+                <div class="assistant-chat-container" style="display: flex; flex-direction: column; flex: 1; min-height: 300px; gap: 10px;">
+                    <div style="font-family: 'Outfit', sans-serif; font-weight: 700; color: var(--text-secondary); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.5px;">
+                        Interactive Audit Chat
+                    </div>
+                    <div id="assistant-chat-messages" class="chat-messages" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 14px; background: rgba(10, 15, 30, 0.45); border-radius: var(--radius-sm); border: 1px solid var(--border-glass); min-height: 200px;">
+                        <div class="chat-bubble bot">
+                            <div class="chat-avatar"><i class="fa-solid fa-robot"></i></div>
+                            <div class="chat-text">
+                                Hello! I am your AI Legal Assistant. Upload a PDF or click questions above to start auditing the workstation state!
+                            </div>
                         </div>
+                    </div>
+                    <div class="assistant-chat-input-bar" style="display: flex; gap: 8px; margin-top: auto;">
+                        <input type="text" id="assistant-chat-input" placeholder="Ask AI about this case..." autocomplete="off" style="flex: 1; padding: 10px 14px; background: rgba(10, 15, 30, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-sm); color: var(--text-primary); outline: none;">
+                        <button type="button" id="assistant-chat-send-btn" class="btn btn-primary" style="padding: 10px 16px;"><i class="fa-solid fa-paper-plane"></i></button>
                     </div>
                 </div>
 

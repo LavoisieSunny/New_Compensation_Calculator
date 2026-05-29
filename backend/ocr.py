@@ -1,16 +1,24 @@
 import os
 import re
 import gc
+import time
 import shutil
 import tempfile
 import logging
 import uuid
 import threading
+import psutil
 import numpy as np
 from PIL import Image
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 from pypdf import PdfReader
 import pypdfium2 as pdfium
+
+# Optimize PaddlePaddle and system memory footprints to prevent OOM process kills on low-RAM VPS servers
+os.environ["FLAGS_allocator_strategy"] = "naive_best_fit"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OMP_THREAD_LIMIT"] = "1"
 
 from backend.parser_heuristics import parse_extracted_text
 from backend.vector_db import index_document, COLLECTION_NAME
@@ -20,6 +28,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("OCRModule")
 
 router = APIRouter()
+
+# Configurable OCR Options (Phase 1 stabilization)
+OCR_PRIMARY_ENGINE = os.getenv("OCR_PRIMARY_ENGINE", "paddle").lower()  # 'paddle' or 'tesseract'
+OCR_SCALE = float(os.getenv("OCR_SCALE", "2.5"))  # 2.5 is ~180 DPI, extremely stable & accurate!
+OCR_RENDER_DPI = int(os.getenv("OCR_RENDER_DPI", "150"))
+OCR_PAGE_TIMEOUT = float(os.getenv("OCR_PAGE_TIMEOUT", "60"))
+OCR_MAX_PAGES_FIRST_PASS = int(os.getenv("OCR_MAX_PAGES_FIRST_PASS", "10"))
+OCR_RETRY_DPI = int(os.getenv("OCR_RETRY_DPI", "200"))
+DEBUG_OCR = os.getenv("DEBUG_OCR", "false").lower() == "true"
 
 # Global PaddleOCR instance (lazy initialized cached singleton)
 _ocr_instance = None
@@ -176,9 +193,8 @@ def extract_alternate_pdf_text(file_path: str) -> list:
 
 def classify_scanned_page(pil_img) -> str:
     """
-    Intelligent pre-OCR Page Classifier.
-    Analyzes visual entropy (variance/stddev) and edge pixel density.
-    Bypasses blank, separator, or low-entropy pages from OCR to protect memory.
+    Intelligent pre-OCR Page Classifier returning: 'blank', 'low-content', 'text-heavy', or 'image-heavy'.
+    Bypasses blank pages from OCR entirely to protect memory.
     """
     try:
         import cv2
@@ -192,9 +208,9 @@ def classify_scanned_page(pil_img) -> str:
         stddev = np.std(gray)
         logger.info(f"Page Classifier: Grayscale variance = {variance:.2f}, stddev = {stddev:.2f}")
 
-        # Completely blank scan/separator or low-entropy page detection (grayscale variance extremely low)
+        # Blank/separator detection (extremely low variance or stddev)
         if variance < 50.0 or stddev < 7.0:
-            return "scanned_blank"
+            return "blank"
 
         # Count high-contrast edge/text pixels
         _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -205,16 +221,21 @@ def classify_scanned_page(pil_img) -> str:
 
         # If less than 0.15% has content, classify as blank
         if ratio < 0.0015:
-            return "scanned_blank"
+            return "blank"
 
-        # If massive dark blocks (large pictures, non-text)
-        if ratio > 0.40:
-            return "image_only"
+        # Low-content / minimal text (Tesseract primary)
+        if ratio < 0.03:
+            return "low-content"
 
-        return "dense_text"
+        # Text-heavy page
+        if ratio <= 0.25:
+            return "text-heavy"
+
+        # Image-heavy page
+        return "image-heavy"
     except Exception as e:
-        logger.warning(f"Fast page classification failed, defaulting to dense_text: {str(e)}")
-        return "dense_text"
+        logger.warning(f"Fast page classification failed, defaulting to text-heavy: {str(e)}")
+        return "text-heavy"
 # ======================================================
 # MAX PAGE MEMORY GUARD (DOWNSCALE GUARD)
 # ======================================================
@@ -501,20 +522,20 @@ def run_tesseract_fallback(pil_img) -> tuple:
 # STABILIZED SEQUENTIAL PAGE OCR STAGE
 # ======================================================
 
-def perform_ocr_page_stable(ocr_engine, page_doc, page_idx: int, total_pages: int, pdf_path: str = None) -> tuple:
+def perform_ocr_page_stable(ocr_engine, page_doc, page_idx: int, total_pages: int, pdf_path: str = None, dpi: int = 150) -> tuple:
     """
     Performs stable single-pass OCR on a page.
     1. PYMUPDF Digital Selectable Text Check (TRUST native text first)
     2. Visual Page Classification (Skip blank / separator pages)
     3. Memory downscale guards for extremely large pages
     4. Lightweight preprocessing
-    5. Single-pass PaddleOCR at 216 DPI (with timeout guard)
-    6. Conditionally allow a 300 DPI retry only if conf < 0.20 and pages <= 3
-    7. Basic last-resort Tesseract fallback
-    8. Strict page-wise variable deletion and garbage collection
+    5. Single-pass OCR at specified DPI (with timeout guard)
+    6. Primary / Fallback failover strategy (PaddleOCR -> Tesseract)
+    7. Strict page-wise variable deletion and garbage collection
     """
     page_num = page_idx + 1
-    logger.info(f"--- START OCR PIPELINE FOR PAGE {page_num}/{total_pages} ---")
+    logger.info(f"--- START OCR PIPELINE FOR PAGE {page_num}/{total_pages} (DPI={dpi}) ---")
+    start_time = time.time()
     
     # 1. Native Selectable Text Check
     page_text = ""
@@ -532,7 +553,14 @@ def perform_ocr_page_stable(ocr_engine, page_doc, page_idx: int, total_pages: in
         keywords = ["court", "claimant", "petitioner", "respondent", "accident", "compensation", "tribunal", "judgment", "deceased", "injured"]
         hits = sum(1 for kw in keywords if kw in page_text.lower())
         if hits >= 2:
+            elapsed = time.time() - start_time
+            try:
+                ram_mb = int(psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024))
+                ram_str = f"{ram_mb}MB"
+            except Exception:
+                ram_str = "N/A"
             logger.info(f"Page {page_num}: TRUST native PyMuPDF text (len={len(page_text)}, keyword_hits={hits}). Bypassing OCR.")
+            logger.info(f"\nPage {page_num}\nEngine=PyMuPDF\nTime={elapsed:.1f}s\nConfidence=1.0\nRAM={ram_str}\n")
             lines = [l.strip() for l in page_text.split("\n") if l.strip()]
             page_meta = {
                 "page": page_num,
@@ -546,23 +574,31 @@ def perform_ocr_page_stable(ocr_engine, page_doc, page_idx: int, total_pages: in
             }
             return lines, page_meta
 
-    # 2. Render Page image at 216 DPI (scale=3.0)
+    # 2. Render Page image at specified DPI
     pil_img = None
+    scale = dpi / 72.0
     try:
-        pil_img = render_pdf_page_high_dpi(pdf_path, page_idx, scale=3.0) if pdf_path else page_doc.render(scale=3.0).to_pil()
+        pil_img = render_pdf_page_high_dpi(pdf_path, page_idx, scale=scale) if pdf_path else page_doc.render(scale=scale).to_pil()
     except Exception as e:
-        logger.error(f"Failed to render page {page_num} at 216 DPI: {str(e)}")
+        logger.error(f"Failed to render page {page_num} at DPI {dpi}: {str(e)}")
         return [], {"page": page_num, "engine": "Error", "confidence": 0.0, "lines": 0}
 
     # 3. Visual Page Classifier (Skip blank scans)
     classification = classify_scanned_page(pil_img)
-    if classification in ["scanned_blank", "image_only"]:
-        logger.info(f"Page {page_num}: Classified as {classification}. Bypassing OCR entirely.")
+    if classification == "blank":
+        elapsed = time.time() - start_time
+        try:
+            ram_mb = int(psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024))
+            ram_str = f"{ram_mb}MB"
+        except Exception:
+            ram_str = "N/A"
+        logger.info(f"Page {page_num}: Classified as blank. Bypassing OCR entirely.")
+        logger.info(f"\nPage {page_num}\nEngine=Skipped-blank\nTime={elapsed:.1f}s\nConfidence=1.0\nRAM={ram_str}\n")
         del pil_img
         gc.collect()
         return [], {
             "page": page_num,
-            "engine": f"Skipped-{classification}",
+            "engine": "Skipped-blank",
             "dpi": 0,
             "confidence": 1.0,
             "text_length": 0,
@@ -581,57 +617,80 @@ def perform_ocr_page_stable(ocr_engine, page_doc, page_idx: int, total_pages: in
     save_ocr_debug_image(f"debug_original_{page_num}.png", pil_img)
     save_ocr_debug_image(f"debug_processed_{page_num}.png", processed_img)
 
-    # 6. Single Pass PaddleOCR with Timeout Guard (15 seconds max)
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
-    processed_img.save(temp_file)
-    
     lines = []
     conf = 0.0
-    engine_used = "PaddleOCR"
-    dpi_used = 216
+    engine_used = ""
     
-    def run_paddle():
-        engine = get_ocr_instance()
-        if engine:
-            return engine.ocr(temp_file)
-        return None
-
-    try:
-        result, status = run_with_timeout(run_paddle, timeout=15.0)
-        if status == "timeout":
-            logger.warning(f"PaddleOCR timed out on page {page_num} after 15 seconds. Aborting page safely.")
-            result = None
-
-        if result:
-            lines = extract_text_lines_from_paddle_result(result)
-            conf = calculate_paddle_confidence(result)
-            if conf == 0.00 and len(lines) >= 15:
-                conf = 0.85
-    except Exception as e:
-        logger.error(f"PaddleOCR execution failed on page {page_num}: {str(e)}")
-    finally:
-        try:
-            os.unlink(temp_file)
-        except Exception:
-            pass
-
-    # 7. Last-resort basic Tesseract fallback (if empty text OR confidence < 0.15)
-    if (len(lines) == 0 or conf < 0.15) and is_tesseract_available():
-        logger.info(f"Page {page_num}: PaddleOCR returned empty or low confidence ({conf:.2f} < 0.15). Running last-resort Tesseract fallback.")
+    # 6. Primary / Fallback strategy
+    if classification == "low-content":
+        logger.info(f"Page {page_num}: Classified as low-content. Routing directly to Tesseract.")
         try:
             lines, conf = run_tesseract_fallback(processed_img)
             engine_used = "Tesseract"
-        except Exception as tess_err:
-            logger.error(f"Tesseract fallback failed: {str(tess_err)}")
+        except Exception as e:
+            logger.error(f"Direct Tesseract run failed on page {page_num}: {str(e)}")
+    else:
+        logger.info(f"Page {page_num}: Classified as {classification}. Running PaddleOCR primary.")
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
+        processed_img.save(temp_file)
+        
+        def run_paddle():
+            engine = get_ocr_instance()
+            if engine:
+                return engine.ocr(temp_file)
+            return None
+
+        paddle_success = False
+        try:
+            result, status = run_with_timeout(run_paddle, timeout=OCR_PAGE_TIMEOUT)
+            if status == "timeout":
+                logger.warning(f"PaddleOCR timed out on page {page_num} after {OCR_PAGE_TIMEOUT} seconds.")
+            elif result:
+                lines = extract_text_lines_from_paddle_result(result)
+                conf = calculate_paddle_confidence(result)
+                if conf == 0.00 and len(lines) >= 15:
+                    conf = 0.85
+                
+                # Check confidence threshold
+                if len(lines) > 0 and conf >= 0.50:
+                    engine_used = "PaddleOCR"
+                    paddle_success = True
+                else:
+                    logger.info(f"Page {page_num}: PaddleOCR confidence {conf:.2f} below 0.50. Escalating.")
+        except Exception as e:
+            logger.error(f"PaddleOCR primary failed on page {page_num}: {str(e)}")
+        finally:
+            try:
+                os.unlink(temp_file)
+            except Exception:
+                pass
+
+        # 7. Fallback to Tesseract if Paddle failed or low confidence
+        if not paddle_success:
+            logger.info(f"Page {page_num}: Escalating to Tesseract fallback.")
+            try:
+                lines, conf = run_tesseract_fallback(processed_img)
+                engine_used = "Tesseract"
+            except Exception as tess_err:
+                logger.error(f"Tesseract fallback failed on page {page_num}: {str(tess_err)}")
 
     # 8. Strict page-wise memory cleanup
     del pil_img, processed_img
     gc.collect()
     
+    elapsed = time.time() - start_time
+    try:
+        ram_mb = int(psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024))
+        ram_str = f"{ram_mb}MB"
+    except Exception:
+        ram_str = "N/A"
+        
+    logger.info(f"\nPage {page_num}\nEngine={engine_used}\nTime={elapsed:.1f}s\nConfidence={conf:.2f}\nRAM={ram_str}\n")
+    
     page_meta = {
         "page": page_num,
         "engine": engine_used,
-        "dpi": dpi_used,
+        "dpi": dpi,
         "confidence": round(conf, 3),
         "text_length": sum(len(l) for l in lines),
         "quality_score": score_ocr_page_quality(lines),
@@ -639,7 +698,6 @@ def perform_ocr_page_stable(ocr_engine, page_doc, page_idx: int, total_pages: in
         "lines": len(lines)
     }
     
-    logger.info(f"Page {page_num} completed. lines={len(lines)}, conf={conf:.2f}")
     return lines, page_meta
 
 
@@ -688,8 +746,11 @@ def find_relevant_pages_by_keywords(file_path: str, total_pages: int) -> list:
 
 def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_pages: bool = False) -> tuple:
     """
-    Sequentially renders and processes relevant pages of a scanned PDF.
-    Excludes procedural or summons pages, processes sequentially with direct memory cleanups.
+    Sequentially renders and processes pages of a scanned PDF.
+    Implements a strict multi-pass memory-managed strategy:
+    Pass 1: Render and process first 10 pages at 150 DPI.
+    Pass 2: If page quality is poor/failed, retry only those pages at 200 DPI.
+    Remaining Pages: Sequentially processed at 150 DPI.
     """
     ocr_engine = get_ocr_instance()
 
@@ -706,48 +767,90 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
         total_pages = len(doc)
         logger.info(f"Scanned PDF '{file_path}' ({total_pages} pages): sequential stable OCR pipeline...")
 
-        # Optimization: scan first 12 + last 8 + dynamically found keyword pages
-        if total_pages > 10 and not scan_all_pages:
-            base_pages = list(range(12)) + list(range(total_pages - 8, total_pages))
-            dynamic_pages = find_relevant_pages_by_keywords(file_path, total_pages)
-            pages_to_scan = sorted(set(base_pages + dynamic_pages))
-            logger.info(f"Large PDF detected. Scanning pages: {[p+1 for p in pages_to_scan]}")
-        else:
-            pages_to_scan = list(range(total_pages))
+        page_results = {} # page_idx -> (lines, page_meta)
+        
+        # --- PASS 1: Process first 10 pages @ 150 DPI ---
+        first_pass_limit = min(total_pages, OCR_MAX_PAGES_FIRST_PASS)
+        logger.info(f"--- PASS 1: Scanning first {first_pass_limit} pages @ 150 DPI ---")
+        
+        for idx in range(first_pass_limit):
+            page_num = idx + 1
+            page_lines, page_meta = perform_ocr_page_stable(
+                ocr_engine, doc[idx], idx, total_pages, pdf_path=file_path, dpi=OCR_RENDER_DPI
+            )
+            page_results[idx] = (page_lines, page_meta)
+            
+            if progress_callback:
+                progress_callback(int(((idx + 1) / total_pages) * 45))
 
+        # --- PASS 2: Retry failed/poor pages of Pass 1 @ 200 DPI ---
+        failed_pages_in_pass1 = []
+        for idx in range(first_pass_limit):
+            page_lines, page_meta = page_results[idx]
+            q = page_meta.get("quality_score", 0.0)
+            conf = page_meta.get("confidence", 0.0)
+            
+            # Poor quality criteria
+            is_poor = (len(page_lines) == 0 or q < 0.15 or conf < 0.30)
+            # Do not retry skipped blank pages
+            is_skipped = "Skipped" in page_meta.get("engine", "")
+            
+            if is_poor and not is_skipped:
+                failed_pages_in_pass1.append(idx)
+
+        if failed_pages_in_pass1:
+            logger.info(f"--- PASS 2: Retrying {len(failed_pages_in_pass1)} poor quality/failed pages @ 200 DPI: {[p+1 for p in failed_pages_in_pass1]} ---")
+            for idx in failed_pages_in_pass1:
+                page_num = idx + 1
+                logger.info(f"Retrying page {page_num} at {OCR_RETRY_DPI} DPI.")
+                page_lines, page_meta = perform_ocr_page_stable(
+                    ocr_engine, doc[idx], idx, total_pages, pdf_path=file_path, dpi=OCR_RETRY_DPI
+                )
+                
+                # Update only if we got better results
+                prev_lines, prev_meta = page_results[idx]
+                if len(page_lines) > len(prev_lines) or page_meta.get("confidence", 0.0) > prev_meta.get("confidence", 0.0):
+                    page_results[idx] = (page_lines, page_meta)
+                    logger.info(f"Page {page_num} successfully updated with higher DPI retry.")
+
+        # --- REMAINDER PASS: Process pages 11+ sequentially @ 150 DPI ---
+        if total_pages > first_pass_limit:
+            logger.info(f"--- REMAINDER PASS: Scanning pages {first_pass_limit+1} to {total_pages} @ 150 DPI ---")
+            for idx in range(first_pass_limit, total_pages):
+                page_num = idx + 1
+                page_lines, page_meta = perform_ocr_page_stable(
+                    ocr_engine, doc[idx], idx, total_pages, pdf_path=file_path, dpi=OCR_RENDER_DPI
+                )
+                page_results[idx] = (page_lines, page_meta)
+                
+                if progress_callback:
+                    progress_callback(int(((idx + 1) / total_pages) * 90))
+
+        # --- COMPILE SEQUENTIAL RESULTS ---
         text_lines = []
         failed_pages = []
         successful_pages = []
         all_preprocessing_steps = []
-        total_retry_count = 0
+        total_retry_count = len(failed_pages_in_pass1)
         page_qualities = []
         page_confidences = []
         fallback_engine_used = ""
         page_details = []
-        
-        # Process pages strictly sequentially (no multiprocessing, no thread pools)
-        for idx, page_idx in enumerate(pages_to_scan):
-            page_num = page_idx + 1
-            text_lines.append(f"--- PAGE {page_num} ---")
-            
-            # Run stable pipeline on page
-            page_lines, page_meta = perform_ocr_page_stable(
-                ocr_engine, doc[page_idx], page_idx, total_pages, pdf_path=file_path
-            )
 
+        for idx in range(total_pages):
+            page_num = idx + 1
+            page_lines, page_meta = page_results[idx]
+            
             q = page_meta.get("quality_score", 0.0)
             conf = page_meta.get("confidence", 0.0)
             engine = page_meta.get("engine", "PaddleOCR")
             
             page_qualities.append(q)
             page_confidences.append(conf)
-
-            logger.info(f"Page {page_num}/{total_pages}: engine={engine}, quality={q:.2f}, lines={len(page_lines)}")
             page_details.append(page_meta)
 
-            if engine in ["Tesseract", "EasyOCR"]:
-                total_retry_count += 1
-                fallback_engine_used = engine
+            if engine == "Tesseract":
+                fallback_engine_used = "Tesseract"
 
             for step in page_meta.get("preprocessing_applied", []):
                 if step not in all_preprocessing_steps:
@@ -758,10 +861,8 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
             else:
                 failed_pages.append(page_num)
 
+            text_lines.append(f"--- PAGE {page_num} ---")
             text_lines.extend(page_lines)
-
-            if progress_callback:
-                progress_callback(int(((idx + 1) / len(pages_to_scan)) * 90))
 
         overall_quality = round(sum(page_qualities) / len(page_qualities), 4) if page_qualities else 0.0
         overall_conf = round(sum(page_confidences) / len(page_confidences), 4) if page_confidences else 0.0
@@ -1235,3 +1336,34 @@ async def get_batch_status():
         "success": True,
         "queue": list(BATCH_QUEUE.values()),
     }
+
+
+from pydantic import BaseModel
+
+class AIRecoverRequest(BaseModel):
+    raw_text: list[str]
+
+@router.post("/ai-recover")
+async def ai_recover_fields(request: AIRecoverRequest):
+    """
+    Receives raw OCR'd text lines and executes the LLM parser to extract 
+    accurate structured legal entities.
+    """
+    try:
+        from backend.llm_client import ai_data_recovery
+        full_text = "\n".join(request.raw_text)
+        
+        # Invoke LLM parsing
+        recovered_data = ai_data_recovery(full_text)
+        
+        # Re-format output compatibility with calculator formatting
+        from backend.parser_heuristics import format_suggestions_for_calculator
+        formatted = format_suggestions_for_calculator(recovered_data)
+        
+        return {
+            "success": True,
+            "suggestions": formatted,
+            "raw_recovered": recovered_data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

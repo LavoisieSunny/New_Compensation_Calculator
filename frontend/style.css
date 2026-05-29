@@ -2278,10 +2278,6 @@ select.low-confidence-input {
     overflow-y: auto;
 }
 
-.tab-hidden {
-    display: none !important;
-}
-
 /* Visibility State Helpers */
 .hidden-section {
     display: none !important;
@@ -2300,5 +2296,48 @@ select.low-confidence-input {
     visibility: visible !important;
     opacity: 1 !important;
 }
+
+/* --- PREMIUM AI LEGAL ASSISTANT DRAWER STYLES --- */
+.assistant-case-brief-card {
+    background: rgba(10, 15, 30, 0.45);
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow-inset);
+}
+.assistant-suggested-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+.suggested-question-pill {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-glass);
+    border-radius: 20px;
+    padding: 8px 14px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.suggested-question-pill:hover {
+    background: rgba(0, 242, 254, 0.08);
+    border-color: var(--color-primary);
+    color: var(--text-primary);
+    transform: translateX(4px);
+}
+.suggested-question-pill i {
+    color: var(--color-primary);
+}
+
+
+
+
 
 
