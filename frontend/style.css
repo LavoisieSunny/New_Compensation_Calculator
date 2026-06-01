@@ -278,13 +278,13 @@ body {
 }
 
 .tab-viewport.active-viewport {
-    display: flex;
-    flex-direction: column;
+    display: flex !important;
+    flex-direction: column !important;
     animation: fadeIn var(--transition-normal) forwards;
 }
 
 .workspace-grid {
-    display: grid;
+    display: grid !important;
     gap: 24px;
     height: 100%;
     width: 100%;
@@ -292,23 +292,27 @@ body {
     min-height: 0;
 }
 
-.workspace-grid.split-55-45 {
-    grid-template-columns: 55% 45%;
+/* Locked Side-by-Side Desktop Columns Layout (Width > 480px) */
+@media (min-width: 481px) {
+    .workspace-grid.split-55-45 {
+        grid-template-columns: 55% 45% !important;
+    }
+
+    .workspace-grid.split-50-50 {
+        grid-template-columns: 1fr 1fr !important;
+    }
+
+    .workspace-grid.split-40-60 {
+        grid-template-columns: 0.8fr 1.2fr !important;
+    }
 }
 
-.workspace-grid.split-50-50 {
-    grid-template-columns: 1fr 1fr;
-}
-
-.workspace-grid.split-40-60 {
-    grid-template-columns: 0.8fr 1.2fr;
-}
-
+/* Stacked Mobile Columns Layout (Width <= 480px) */
 @media (max-width: 480px) {
     .workspace-grid.split-55-45,
     .workspace-grid.split-50-50,
     .workspace-grid.split-40-60 {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr !important;
         overflow-y: auto;
     }
 }
