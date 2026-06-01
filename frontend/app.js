@@ -755,6 +755,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (liveMetricsCard) liveMetricsCard.classList.add("show");
                 if (evaluatorCard) evaluatorCard.classList.add("show");
 
+                if (typeof triggerTabNotification === "function") {
+                    triggerTabNotification("analysis");
+                }
+
                 showToast("Case PDF analyzed! Form auto-filled focusing on Previous Judgment, Petition, and Prayer details. Please manually review fields.", "success");
             } else {
                 showToast("Failed to extract data from the PDF: " + (data.message || "Unknown OCR error."), "error");
@@ -1232,6 +1236,11 @@ document.addEventListener("DOMContentLoaded", () => {
         
         chatMessages.appendChild(bubble);
         chatMessages.scrollTop = chatMessages.scrollHeight;
+
+        if (!isLoader && typeof bindChatBubbleClick === "function") {
+            bindChatBubbleClick(bubble);
+        }
+
         return id;
     }
 
@@ -1380,6 +1389,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 ${precedentsHtml}
             </div>
         `;
+
+        if (typeof triggerTabNotification === "function") {
+            triggerTabNotification("benchmarking");
+        }
     }
 
     // ==========================================================================
@@ -1766,6 +1779,132 @@ document.addEventListener("DOMContentLoaded", () => {
     const assistantChatInput = document.getElementById("assistant-chat-input");
     const assistantChatSendBtn = document.getElementById("assistant-chat-send-btn");
 
+    // --- WORKSTATION RIGHT PANE TABS CONTROLLER ---
+    const paneTabButtons = document.querySelectorAll(".pane-tab-btn");
+    const paneTabContents = document.querySelectorAll(".pane-tab-content");
+    const benchmarkingTabDot = document.getElementById("benchmarking-tab-dot");
+    const analysisTabDot = document.getElementById("analysis-tab-dot");
+
+    paneTabButtons.forEach(btn => {
+        btn.addEventListener("click", () => {
+            const targetTab = btn.getAttribute("data-pane-tab");
+            
+            // Switch tabs active styles
+            paneTabButtons.forEach(b => {
+                if (b === btn) {
+                    b.classList.add("active");
+                    b.style.background = "rgba(0, 242, 254, 0.08)";
+                    b.style.borderColor = "rgba(0, 242, 254, 0.3)";
+                    b.style.color = "var(--color-primary)";
+                } else {
+                    b.classList.remove("active");
+                    b.style.background = "transparent";
+                    b.style.borderColor = "transparent";
+                    b.style.color = "var(--text-secondary)";
+                }
+            });
+
+            // Toggle tab content display
+            paneTabContents.forEach(content => {
+                if (content.id === `pane-tab-${targetTab}-content`) {
+                    content.classList.add("active");
+                    content.classList.remove("hidden");
+                } else {
+                    content.classList.remove("active");
+                    content.classList.add("hidden");
+                }
+            });
+
+            // Clear dot when tab is clicked
+            if (targetTab === "benchmarking" && benchmarkingTabDot) {
+                benchmarkingTabDot.classList.add("hidden");
+            } else if (targetTab === "analysis" && analysisTabDot) {
+                analysisTabDot.classList.add("hidden");
+            }
+        });
+    });
+
+    // Helper to get active tab
+    function getActiveRightPaneTab() {
+        const activeBtn = document.querySelector(".pane-tab-btn.active");
+        return activeBtn ? activeBtn.getAttribute("data-pane-tab") : "pdf";
+    }
+
+    // Helper to trigger tab notification dot rather than forcing switch
+    window.triggerTabNotification = function(tabName) {
+        if (getActiveRightPaneTab() !== tabName) {
+            if (tabName === "benchmarking" && benchmarkingTabDot) {
+                benchmarkingTabDot.classList.remove("hidden");
+            } else if (tabName === "analysis" && analysisTabDot) {
+                analysisTabDot.classList.remove("hidden");
+            }
+        }
+    };
+
+    // --- CHAT READ MODAL ENGINE (BIG BOX VIEWER) ---
+    const chatReadModal = document.getElementById("chat-read-modal");
+    const chatModalBodyContent = document.getElementById("chat-modal-body-content");
+    const closeChatModalBtn = document.getElementById("close-chat-modal-btn");
+    const dismissChatModalBtn = document.getElementById("dismiss-chat-modal-btn");
+
+    window.openChatReader = function(htmlContent) {
+        if (chatReadModal && chatModalBodyContent) {
+            chatModalBodyContent.innerHTML = htmlContent;
+            chatReadModal.classList.add("open");
+        }
+    };
+
+    window.closeChatReader = function() {
+        if (chatReadModal) {
+            chatReadModal.classList.remove("open");
+        }
+    };
+
+    if (closeChatModalBtn) closeChatModalBtn.addEventListener("click", closeChatReader);
+    if (dismissChatModalBtn) dismissChatModalBtn.addEventListener("click", closeChatReader);
+    
+    // Close modal when clicking outside content area
+    window.addEventListener("click", (e) => {
+        if (e.target === chatReadModal) {
+            closeChatReader();
+        }
+    });
+
+    // Function to attach click listeners to chat texts
+    window.bindChatBubbleClick = function(bubbleElement) {
+        const textElement = bubbleElement.querySelector(".chat-text");
+        if (textElement) {
+            textElement.addEventListener("click", () => {
+                openChatReader(textElement.innerHTML);
+            });
+        }
+    };
+
+    // Bind existing bubbles on startup
+    document.querySelectorAll(".chat-bubble").forEach(bubble => {
+        bindChatBubbleClick(bubble);
+    });
+
+    // Wide view toggle inside slideover header
+    const expandSlideoverBtn = document.getElementById("expand-slideover-btn");
+    if (expandSlideoverBtn) {
+        expandSlideoverBtn.addEventListener("click", () => {
+            if (slideover) {
+                slideover.classList.toggle("expanded");
+                const icon = expandSlideoverBtn.querySelector("i");
+                if (icon) {
+                    if (slideover.classList.contains("expanded")) {
+                        icon.className = "fa-solid fa-compress";
+                        expandSlideoverBtn.title = "Toggle Normal View";
+                    } else {
+                        icon.className = "fa-solid fa-expand";
+                        expandSlideoverBtn.title = "Toggle Wide View";
+                    }
+                }
+            }
+        });
+    }
+
     if (aiAssistantTrigger) {
         aiAssistantTrigger.addEventListener("click", () => {
             if (aiAssistantTrigger.classList.contains("active") && slideover.classList.contains("open")) {
@@ -1782,7 +1921,17 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function closeDrawer() {
-        if (slideover) slideover.classList.remove("open");
+        if (slideover) {
+            slideover.classList.remove("open");
+            slideover.classList.remove("expanded");
+            if (expandSlideoverBtn) {
+                const icon = expandSlideoverBtn.querySelector("i");
+                if (icon) {
+                    icon.className = "fa-solid fa-expand";
+                    expandSlideoverBtn.title = "Toggle Wide View";
+                }
+            }
+        }
         if (aiAssistantTrigger) aiAssistantTrigger.classList.remove("active");
     }
 
@@ -1936,6 +2085,11 @@ document.addEventListener("DOMContentLoaded", () => {
         
         assistantChatMessages.appendChild(bubble);
         assistantChatMessages.scrollTop = assistantChatMessages.scrollHeight;
+
+        if (!isLoader && typeof bindChatBubbleClick === "function") {
+            bindChatBubbleClick(bubble);
+        }
+
         return id;
     }
 

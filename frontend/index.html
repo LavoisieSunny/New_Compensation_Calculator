@@ -401,103 +401,127 @@
                     </div>
 
                     <!-- Right: Dynamic Legal Precedents & Live Preview -->
-                    <div class="panel scroll-y" id="calculator-right-pane" style="position: relative; display: flex; flex-direction: column; padding: 20px; gap: 20px;">
+                    <div class="panel scroll-y" id="calculator-right-pane" style="position: relative; display: flex; flex-direction: column; padding: 20px; gap: 15px;">
                         
-                        <!-- High-Fidelity PDF Preview Panel -->
-                        <div class="card preview-card" id="single-preview-card" style="min-height: 450px; width: 100%; margin: 0; padding: 16px; display: flex; flex-direction: column;">
-                            <div class="card-header" style="padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
-                                <div style="display: flex; align-items: center; gap: 8px;">
-                                    <h3><i class="fa-solid fa-eye text-glow"></i> Case PDF Preview</h3>
-                                    <span id="single-preview-filename" class="badge tech-badge">No File Loaded</span>
-                                </div>
-                                <button type="button" id="ai-extract-btn" class="btn btn-small btn-secondary" style="font-size: 0.72rem; padding: 4px 8px; display: none;">
-                                    <i class="fa-solid fa-wand-magic-sparkles"></i> Ask LLM to Extract
-                                </button>
-                            </div>
-                            <div class="single-preview-container" id="single-preview-container" style="flex: 1; border: 1px solid var(--border-glass); border-radius: var(--radius-sm); overflow: hidden; background: rgba(0, 0, 0, 0.2);">
-                                <div class="preview-empty-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 10px; opacity: 0.5;">
-                                    <i class="fa-solid fa-file-pdf" style="font-size: 3rem; color: var(--color-primary)"></i>
-                                    <p style="font-size: 0.8rem; color: var(--text-secondary)">Upload a PDF on the left to see the live document preview here.</p>
-                                </div>
-                            </div>
+                        <!-- Right Pane Tabs Navigator -->
+                        <div class="right-pane-tabs" style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-glass); padding-bottom: 10px; margin-bottom: 5px;">
+                            <button type="button" class="pane-tab-btn active" data-pane-tab="pdf" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-glass); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-sm); font-family: 'Outfit', sans-serif; font-size: 0.85rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all var(--transition-fast);">
+                                <i class="fa-solid fa-file-pdf" style="color: var(--color-danger);"></i> PDF Preview
+                            </button>
+                            <button type="button" class="pane-tab-btn" data-pane-tab="benchmarking" style="background: transparent; border: 1px solid transparent; color: var(--text-secondary); padding: 8px 16px; border-radius: var(--radius-sm); font-family: 'Outfit', sans-serif; font-size: 0.85rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all var(--transition-fast); position: relative;">
+                                <i class="fa-solid fa-scale-balanced" style="color: var(--color-primary);"></i> Benchmarking
+                                <span id="benchmarking-tab-dot" class="notification-dot hidden"></span>
+                            </button>
+                            <button type="button" class="pane-tab-btn" data-pane-tab="analysis" style="background: transparent; border: 1px solid transparent; color: var(--text-secondary); padding: 8px 16px; border-radius: var(--radius-sm); font-family: 'Outfit', sans-serif; font-size: 0.85rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all var(--transition-fast); position: relative;">
+                                <i class="fa-solid fa-chart-line" style="color: var(--color-success);"></i> Analysis & Metrics
+                                <span id="analysis-tab-dot" class="notification-dot hidden"></span>
+                            </button>
                         </div>
 
-                        <!-- Live Metrics Preview Card -->
-                        <div class="card hidden-section" id="live-metrics-card">
-                            <div class="card-header">
-                                <h3><i class="fa-solid fa-chart-simple text-glow"></i> Live Metrics Preview</h3>
-                                <span class="badge tech-badge">Active</span>
-                            </div>
-                            <div class="metrics-grid">
-                                <div class="metric-item">
-                                    <span class="label">Calculated Age</span>
-                                    <span class="value" id="live-age">—</span>
-                                </div>
-                                <div class="metric-item">
-                                    <span class="label">Multiplier</span>
-                                    <span class="value" id="live-multiplier">—</span>
-                                </div>
-                                <div class="metric-item full-width" id="live-prospects-item">
-                                    <span class="label">Future Prospects</span>
-                                    <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
-                                        <div class="progress-bar-wrapper" style="flex: 1;">
-                                            <div id="live-prospects-bar" class="progress-bar-fill" style="width: 0%;"></div>
-                                        </div>
-                                        <span class="value" id="live-prospects" style="font-size: 0.95rem; font-weight: 700; min-width: 40px; text-align: right;">—%</span>
+                        <!-- Tab 1 Content: PDF Preview -->
+                        <div id="pane-tab-pdf-content" class="pane-tab-content active" style="flex: 1; display: flex; flex-direction: column;">
+                            <!-- High-Fidelity PDF Preview Panel -->
+                            <div class="card preview-card" id="single-preview-card" style="height: 100%; min-height: 480px; width: 100%; margin: 0; padding: 16px; display: flex; flex-direction: column; flex: 1;">
+                                <div class="card-header" style="padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <h3><i class="fa-solid fa-eye text-glow"></i> Case PDF Preview</h3>
+                                        <span id="single-preview-filename" class="badge tech-badge">No File Loaded</span>
                                     </div>
+                                    <button type="button" id="ai-extract-btn" class="btn btn-small btn-secondary" style="font-size: 0.72rem; padding: 4px 8px; display: none;">
+                                        <i class="fa-solid fa-wand-magic-sparkles"></i> Ask LLM to Extract
+                                    </button>
                                 </div>
-                                <div class="metric-item full-width" id="live-deductions-item">
-                                    <span class="label">Personal Deductions</span>
-                                    <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
-                                        <div class="progress-bar-wrapper" style="flex: 1;">
-                                            <div id="live-deductions-bar" class="progress-bar-fill bg-danger" style="width: 0%;"></div>
-                                        </div>
-                                        <span class="value" id="live-deductions" style="font-size: 0.95rem; font-weight: 700; min-width: 40px; text-align: right;">—%</span>
+                                <div class="single-preview-container" id="single-preview-container" style="flex: 1; border: 1px solid var(--border-glass); border-radius: var(--radius-sm); overflow: hidden; background: rgba(0, 0, 0, 0.2);">
+                                    <div class="preview-empty-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 10px; opacity: 0.5;">
+                                        <i class="fa-solid fa-file-pdf" style="font-size: 3rem; color: var(--color-primary)"></i>
+                                        <p style="font-size: 0.8rem; color: var(--text-secondary)">Upload a PDF on the left to see the live document preview here.</p>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Precedent Benchmarking Card -->
-                        <div class="card hidden-section" id="evaluator-card">
-                            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 10px;">
-                                <h3 style="margin: 0;"><i class="fa-solid fa-scale-balanced text-glow"></i> Precedent Benchmarking</h3>
-                                <button type="button" id="trigger-eval-btn" class="btn btn-small btn-primary" style="padding: 6px 12px; font-size: 0.78rem;" disabled>
-                                    <i class="fa-solid fa-wand-magic-sparkles"></i> Benchmark Precedents
-                                </button>
-                            </div>
-                            <div class="card-body" id="evaluator-card-body" style="padding-top: 12px; color: var(--text-secondary); font-size: 0.85rem;">
-                                <div class="empty-state" style="text-align: center; padding: 15px; opacity: 0.6;">
-                                    <i class="fa-solid fa-gavel" style="font-size: 2rem; color: var(--color-primary); margin-bottom: 8px; display: block;"></i>
-                                    Awaiting compensation calculation to perform comparative benchmarking against Qdrant database precedents.
+                        <!-- Tab 2 Content: Benchmarking -->
+                        <div id="pane-tab-benchmarking-content" class="pane-tab-content hidden" style="display: flex; flex-direction: column; gap: 20px;">
+                            <!-- Precedent Benchmarking Card -->
+                            <div class="card hidden-section" id="evaluator-card">
+                                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 10px;">
+                                    <h3 style="margin: 0;"><i class="fa-solid fa-scale-balanced text-glow"></i> Precedent Benchmarking</h3>
+                                    <button type="button" id="trigger-eval-btn" class="btn btn-small btn-primary" style="padding: 6px 12px; font-size: 0.78rem;" disabled>
+                                        <i class="fa-solid fa-wand-magic-sparkles"></i> Benchmark Precedents
+                                    </button>
+                                </div>
+                                <div class="card-body" id="evaluator-card-body" style="padding-top: 12px; color: var(--text-secondary); font-size: 0.85rem;">
+                                    <div class="empty-state" style="text-align: center; padding: 15px; opacity: 0.6;">
+                                        <i class="fa-solid fa-gavel" style="font-size: 2rem; color: var(--color-primary); margin-bottom: 8px; display: block;"></i>
+                                        Awaiting compensation calculation to perform comparative benchmarking against Qdrant database precedents.
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- AI Legal Judgment Summary Card -->
-                        <div class="card hidden-section" id="legal-ai-summary-card">
-                            <div class="card-header">
-                                <h3><i class="fa-solid fa-brain-circuit text-purple"></i> AI Legal Judgment Summary</h3>
-                                <span class="badge tech-badge">AI Analysis</span>
-                            </div>
-                            <div class="card-body" id="legal-ai-summary-body" style="padding-top: 12px; display: flex; flex-direction: column; gap: 14px;">
-                                <div class="empty-summary-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; opacity: 0.5; padding: 20px 0;">
-                                    <i class="fa-solid fa-gavel" style="font-size: 2.5rem; color: #c084fc;"></i>
-                                    <p style="font-size: 0.8rem; color: var(--text-secondary); text-align: center; margin: 0;">Upload a PDF to see the structured legal analysis summary and judicial anomaly checklist.</p>
+                        <!-- Tab 3 Content: Analysis & Metrics -->
+                        <div id="pane-tab-analysis-content" class="pane-tab-content hidden" style="display: flex; flex-direction: column; gap: 20px;">
+                            <!-- Live Metrics Preview Card -->
+                            <div class="card hidden-section" id="live-metrics-card">
+                                <div class="card-header">
+                                    <h3><i class="fa-solid fa-chart-simple text-glow"></i> Live Metrics Preview</h3>
+                                    <span class="badge tech-badge">Active</span>
+                                </div>
+                                <div class="metrics-grid">
+                                    <div class="metric-item">
+                                        <span class="label">Calculated Age</span>
+                                        <span class="value" id="live-age">—</span>
+                                    </div>
+                                    <div class="metric-item">
+                                        <span class="label">Multiplier</span>
+                                        <span class="value" id="live-multiplier">—</span>
+                                    </div>
+                                    <div class="metric-item full-width" id="live-prospects-item">
+                                        <span class="label">Future Prospects</span>
+                                        <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
+                                            <div class="progress-bar-wrapper" style="flex: 1;">
+                                                <div id="live-prospects-bar" class="progress-bar-fill" style="width: 0%;"></div>
+                                            </div>
+                                            <span class="value" id="live-prospects" style="font-size: 0.95rem; font-weight: 700; min-width: 40px; text-align: right;">—%</span>
+                                        </div>
+                                    </div>
+                                    <div class="metric-item full-width" id="live-deductions-item">
+                                        <span class="label">Personal Deductions</span>
+                                        <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
+                                            <div class="progress-bar-wrapper" style="flex: 1;">
+                                                <div id="live-deductions-bar" class="progress-bar-fill bg-danger" style="width: 0%;"></div>
+                                            </div>
+                                            <span class="value" id="live-deductions" style="font-size: 0.95rem; font-weight: 700; min-width: 40px; text-align: right;">—%</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <!-- Extracted Compensation Table Card -->
-                        <div class="card hidden-section" id="compensation-table-card">
-                            <div class="card-header">
-                                <h3><i class="fa-solid fa-table-list text-green"></i> Judicial Compensation Heads</h3>
-                                <span class="badge tech-badge">OCR Extract</span>
+                            <!-- AI Legal Judgment Summary Card -->
+                            <div class="card hidden-section" id="legal-ai-summary-card">
+                                <div class="card-header">
+                                    <h3><i class="fa-solid fa-brain-circuit text-purple"></i> AI Legal Judgment Summary</h3>
+                                    <span class="badge tech-badge">AI Analysis</span>
+                                </div>
+                                <div class="card-body" id="legal-ai-summary-body" style="padding-top: 12px; display: flex; flex-direction: column; gap: 14px;">
+                                    <div class="empty-summary-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; opacity: 0.5; padding: 20px 0;">
+                                        <i class="fa-solid fa-gavel" style="font-size: 2.5rem; color: #c084fc;"></i>
+                                        <p style="font-size: 0.8rem; color: var(--text-secondary); text-align: center; margin: 0;">Upload a PDF to see the structured legal analysis summary and judicial anomaly checklist.</p>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="card-body" id="compensation-table-body" style="padding-top: 12px;">
-                                <div class="empty-table-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; opacity: 0.5; padding: 20px 0;">
-                                    <i class="fa-solid fa-table-list" style="font-size: 2.5rem; color: #34d399;"></i>
-                                    <p style="font-size: 0.8rem; color: var(--text-secondary); text-align: center; margin: 0;">Upload a PDF to view the detailed breakdown of the judicial award heads.</p>
+
+                            <!-- Extracted Compensation Table Card -->
+                            <div class="card hidden-section" id="compensation-table-card">
+                                <div class="card-header">
+                                    <h3><i class="fa-solid fa-table-list text-green"></i> Judicial Compensation Heads</h3>
+                                    <span class="badge tech-badge">OCR Extract</span>
+                                </div>
+                                <div class="card-body" id="compensation-table-body" style="padding-top: 12px;">
+                                    <div class="empty-table-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; opacity: 0.5; padding: 20px 0;">
+                                        <i class="fa-solid fa-table-list" style="font-size: 2.5rem; color: #34d399;"></i>
+                                        <p style="font-size: 0.8rem; color: var(--text-secondary); text-align: center; margin: 0;">Upload a PDF to view the detailed breakdown of the judicial award heads.</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -733,7 +757,12 @@
         <!-- Slide-over Drawer Panel -->
         <div id="right-slideover" class="slideover-panel">
             <div class="slideover-header">
-                <h3 id="slideover-title">🤖 AI Legal Assistant</h3>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <h3 id="slideover-title">🤖 AI Legal Assistant</h3>
+                    <button type="button" id="expand-slideover-btn" class="slideover-expand-btn" title="Toggle Wide View" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1rem; transition: color 0.2s ease;">
+                        <i class="fa-solid fa-expand"></i>
+                    </button>
+                </div>
                 <button type="button" id="close-slideover" class="slideover-close-btn">&times;</button>
             </div>
             <div class="slideover-body" style="height: calc(100% - 70px); padding: 20px; display: flex; flex-direction: column; gap: 15px; overflow-y: auto;">
@@ -797,8 +826,24 @@
             </div>
         </div>
 
-    </div>
+        <!-- Beautiful, premium modal for reading chats in a large box -->
+        <div id="chat-read-modal" class="modal">
+            <div class="modal-content" style="max-width: 850px; background: rgba(11, 20, 38, 0.95); backdrop-filter: blur(20px);">
+                <div class="modal-header" style="border-bottom: 1px solid var(--border-glass);">
+                    <h2><i class="fa-solid fa-comments text-glow"></i> Detailed Message View</h2>
+                    <button type="button" id="close-chat-modal-btn" class="close-btn">&times;</button>
+                </div>
+                <div class="modal-body" id="chat-modal-body-content" style="font-size: 1.1rem; line-height: 1.6; color: var(--text-primary); padding: 30px; overflow-y: auto; max-height: 60vh;">
+                    <!-- Message content goes here -->
+                </div>
+                <div class="modal-footer" style="border-top: 1px solid var(--border-glass);">
+                    <button type="button" id="dismiss-chat-modal-btn" class="btn btn-primary">Close Reader</button>
+                </div>
+            </div>
+        </div>
 
+    </div>
+ 
     <!-- Core App Logic -->
     <script src="app.js"></script>
 </body>
