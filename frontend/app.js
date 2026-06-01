@@ -1793,8 +1793,8 @@ document.addEventListener("DOMContentLoaded", () => {
             paneTabButtons.forEach(b => {
                 if (b === btn) {
                     b.classList.add("active");
-                    b.style.background = "rgba(0, 242, 254, 0.08)";
-                    b.style.borderColor = "rgba(0, 242, 254, 0.3)";
+                    b.style.background = "rgba(11, 58, 114, 0.06)";
+                    b.style.borderColor = "rgba(11, 58, 114, 0.25)";
                     b.style.color = "var(--color-primary)";
                 } else {
                     b.classList.remove("active");

@@ -15,9 +15,9 @@
 </head>
 <body>
     
-    <!-- Glowing background elements -->
-    <div class="bg-glow bg-glow-1"></div>
-    <div class="bg-glow bg-glow-2"></div>
+    <!-- Glowing background elements commented out for clean judicial aesthetic -->
+    <!-- <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div> -->
 
     <div class="app-layout">
         
@@ -79,7 +79,7 @@
 
             <!-- TAB 1: WORKSTATION & DYNAMIC CALCULATOR -->
             <div id="tab-calculator" class="tab-viewport active-viewport">
-                <div class="workspace-grid split-50-50">
+                <div class="workspace-grid split-55-45">
                     
                     <!-- Left: Dynamic Input Form -->
                     <div class="panel scroll-y">
@@ -401,28 +401,28 @@
                     </div>
 
                     <!-- Right: Dynamic Legal Precedents & Live Preview -->
-                    <div class="panel scroll-y" id="calculator-right-pane" style="position: relative; display: flex; flex-direction: column; padding: 20px; gap: 15px;">
+                    <div class="panel" id="calculator-right-pane" style="position: relative; display: flex; flex-direction: column; padding: 0; gap: 0; overflow: hidden; height: 100%;">
                         
                         <!-- Right Pane Tabs Navigator -->
-                        <div class="right-pane-tabs" style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-glass); padding-bottom: 10px; margin-bottom: 5px;">
-                            <button type="button" class="pane-tab-btn active" data-pane-tab="pdf" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-glass); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-sm); font-family: 'Outfit', sans-serif; font-size: 0.85rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all var(--transition-fast);">
+                        <div class="right-pane-tabs" id="right-pane-tabs" style="height: 44px; border-bottom: 1px solid var(--border-color); padding: 0 16px; display: flex; align-items: center; gap: 8px; background: var(--bg-card); flex-shrink: 0;">
+                            <button type="button" class="pane-tab-btn active" data-pane-tab="pdf" style="background: rgba(11, 58, 114, 0.06); border: 1px solid rgba(11, 58, 114, 0.25); color: var(--color-primary); padding: 6px 12px; border-radius: var(--radius-sm); font-family: 'Outfit', sans-serif; font-size: 0.8rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all var(--transition-fast);">
                                 <i class="fa-solid fa-file-pdf" style="color: var(--color-danger);"></i> PDF Preview
                             </button>
-                            <button type="button" class="pane-tab-btn" data-pane-tab="benchmarking" style="background: transparent; border: 1px solid transparent; color: var(--text-secondary); padding: 8px 16px; border-radius: var(--radius-sm); font-family: 'Outfit', sans-serif; font-size: 0.85rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all var(--transition-fast); position: relative;">
+                            <button type="button" class="pane-tab-btn" data-pane-tab="benchmarking" style="background: transparent; border: 1px solid transparent; color: var(--text-secondary); padding: 6px 12px; border-radius: var(--radius-sm); font-family: 'Outfit', sans-serif; font-size: 0.8rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all var(--transition-fast); position: relative;">
                                 <i class="fa-solid fa-scale-balanced" style="color: var(--color-primary);"></i> Benchmarking
                                 <span id="benchmarking-tab-dot" class="notification-dot hidden"></span>
                             </button>
-                            <button type="button" class="pane-tab-btn" data-pane-tab="analysis" style="background: transparent; border: 1px solid transparent; color: var(--text-secondary); padding: 8px 16px; border-radius: var(--radius-sm); font-family: 'Outfit', sans-serif; font-size: 0.85rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all var(--transition-fast); position: relative;">
+                            <button type="button" class="pane-tab-btn" data-pane-tab="analysis" style="background: transparent; border: 1px solid transparent; color: var(--text-secondary); padding: 6px 12px; border-radius: var(--radius-sm); font-family: 'Outfit', sans-serif; font-size: 0.8rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all var(--transition-fast); position: relative;">
                                 <i class="fa-solid fa-chart-line" style="color: var(--color-success);"></i> Analysis & Metrics
                                 <span id="analysis-tab-dot" class="notification-dot hidden"></span>
                             </button>
                         </div>
 
                         <!-- Tab 1 Content: PDF Preview -->
-                        <div id="pane-tab-pdf-content" class="pane-tab-content active" style="flex: 1; display: flex; flex-direction: column;">
+                        <div id="pane-tab-pdf-content" class="pane-tab-content active" style="flex: 1; display: flex; flex-direction: column; height: calc(100% - 44px); overflow: hidden; margin: 0; padding: 0;">
                             <!-- High-Fidelity PDF Preview Panel -->
-                            <div class="card preview-card" id="single-preview-card" style="height: 100%; min-height: 480px; width: 100%; margin: 0; padding: 16px; display: flex; flex-direction: column; flex: 1;">
-                                <div class="card-header" style="padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                            <div class="card preview-card" id="single-preview-card" style="height: 100%; width: 100%; display: flex; flex-direction: column; margin: 0; padding: 0; border: none; box-shadow: none; background: transparent; flex: 1; overflow: hidden;">
+                                <div class="card-header" style="height: 40px; padding: 0 16px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; margin: 0; flex-shrink: 0; background: var(--bg-panel);">
                                     <div style="display: flex; align-items: center; gap: 8px;">
                                         <h3><i class="fa-solid fa-eye text-glow"></i> Case PDF Preview</h3>
                                         <span id="single-preview-filename" class="badge tech-badge">No File Loaded</span>
@@ -431,7 +431,7 @@
                                         <i class="fa-solid fa-wand-magic-sparkles"></i> Ask LLM to Extract
                                     </button>
                                 </div>
-                                <div class="single-preview-container" id="single-preview-container" style="flex: 1; border: 1px solid var(--border-glass); border-radius: var(--radius-sm); overflow: hidden; background: rgba(0, 0, 0, 0.2);">
+                                <div class="single-preview-container" id="single-preview-container" style="flex: 1; height: calc(100% - 40px); width: 100%; overflow: hidden; background: #ffffff; padding: 0; margin: 0; border: none; border-radius: 0;">
                                     <div class="preview-empty-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 10px; opacity: 0.5;">
                                         <i class="fa-solid fa-file-pdf" style="font-size: 3rem; color: var(--color-primary)"></i>
                                         <p style="font-size: 0.8rem; color: var(--text-secondary)">Upload a PDF on the left to see the live document preview here.</p>
@@ -441,7 +441,7 @@
                         </div>
 
                         <!-- Tab 2 Content: Benchmarking -->
-                        <div id="pane-tab-benchmarking-content" class="pane-tab-content hidden" style="display: flex; flex-direction: column; gap: 20px;">
+                        <div id="pane-tab-benchmarking-content" class="pane-tab-content hidden" style="flex: 1; display: flex; flex-direction: column; gap: 20px; padding: 20px; overflow-y: auto; height: calc(100% - 44px);">
                             <!-- Precedent Benchmarking Card -->
                             <div class="card hidden-section" id="evaluator-card">
                                 <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 10px;">
@@ -460,7 +460,7 @@
                         </div>
 
                         <!-- Tab 3 Content: Analysis & Metrics -->
-                        <div id="pane-tab-analysis-content" class="pane-tab-content hidden" style="display: flex; flex-direction: column; gap: 20px;">
+                        <div id="pane-tab-analysis-content" class="pane-tab-content hidden" style="flex: 1; display: flex; flex-direction: column; gap: 20px; padding: 20px; overflow-y: auto; height: calc(100% - 44px);">
                             <!-- Live Metrics Preview Card -->
                             <div class="card hidden-section" id="live-metrics-card">
                                 <div class="card-header">
