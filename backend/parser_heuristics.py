@@ -43,6 +43,153 @@ HEADING_KEYWORDS = {
 }
 
 
+# ======================================================
+# FIELD ALIAS MAPPING FOR MACT TABULAR FORM EXTRACTION
+# ======================================================
+
+FIELD_LABEL_ALIASES = {
+    "claimant_name": [
+        "name of claimant", "claimant name", "name of the claimant",
+        "name of injured", "injured name", "name of the injured",
+        "name of victim", "petitioner name", "name of petitioner",
+        "name of appellant", "appellant name", "injured person name"
+    ],
+    "deceased_name": [
+        "name of deceased", "deceased name", "name of the deceased",
+        "deceased person name"
+    ],
+    "father_name": [
+        "father name", "father's name", "husband name", "husband's name",
+        "father/husband name", "father / husband name",
+        "father or husband name", "guardian name"
+    ],
+    "age": [
+        "age", "age of claimant", "age of deceased", "age of injured",
+        "age of victim", "age at the time of accident", "age at accident"
+    ],
+    "date_of_birth": [
+        "date of birth", "dob", "d.o.b", "born on", "birth date",
+        "date of birth of claimant", "date of birth of deceased",
+        "date of birth of injured"
+    ],
+    "date_of_accident": [
+        "date of accident", "accident date", "date of occurrence",
+        "date of mishap", "date of incident", "date of collision",
+        "date of injury", "date of the accident"
+    ],
+    "place_of_accident": [
+        "place of accident", "place of occurrence", "place of incident",
+        "location of accident", "accident spot", "site of accident",
+        "place of collision", "venue of accident"
+    ],
+    "occupation": [
+        "occupation", "profession", "trade", "vocation", "employment",
+        "nature of work", "working as", "employed as", "job"
+    ],
+    "monthly_income": [
+        "monthly income", "monthly salary", "monthly wages", "income per month",
+        "salary per month", "wages per month", "monthly earning",
+        "net monthly income", "gross monthly income"
+    ],
+    "fir_number": [
+        "fir no", "fir no.", "fir number", "f.i.r. no", "f.i.r. number",
+        "first information report no", "crime no", "crime number",
+        "cr. no", "cr case no", "police report no"
+    ],
+    "policy_number": [
+        "policy no", "policy no.", "policy number", "insurance policy no",
+        "policy of insurance", "policy bearing no", "insurance no",
+        "insurance number", "cover note no", "cover note number"
+    ],
+    "vehicle_number": [
+        "vehicle no", "vehicle no.", "vehicle number",
+        "vehicle registration no", "reg. no", "reg. no.",
+        "registration no", "registration no.", "registration number",
+        "bearing reg no", "bearing no", "bearing registration no",
+        "offending vehicle no", "accident vehicle no"
+    ],
+    "insurance_company": [
+        "insurance company", "name of insurance company", "insurer",
+        "insurer name", "insurance co", "name of insurer",
+        "respondent insurance"
+    ],
+    "marital_status": [
+        "marital status", "matrimonial status"
+    ],
+    "dependents": [
+        "no. of dependents", "number of dependents", "dependents",
+        "no of dependants", "no. of dependants", "number of dependants",
+        "total dependents"
+    ]
+}
+
+
+def parse_mact_tabular_form(text_lines):
+    """
+    Lightweight MACT Petition Form Parser.
+    Scans for 'Label : Value' structured rows common in MACT petition tabular forms
+    and maps recognized label variants to canonical field names via FIELD_LABEL_ALIASES.
+    Returns dict of {canonical_field_name: raw_value_string}.
+    No ML, no external calls — pure regex, O(n) on input.
+    """
+    # Build reverse lookup: alias_lower -> canonical_field_name
+    alias_lookup = {}
+    for canonical, aliases in FIELD_LABEL_ALIASES.items():
+        for alias in aliases:
+            alias_lookup[alias.lower().strip()] = canonical
+
+    results = {}
+    tabular_line_re = re.compile(
+        r'^(?:\(?[0-9a-zA-Z]+\)?[\.\)\-\s]+)?'
+        r'([A-Za-z][A-Za-z0-9\s\./\(\)\-\&]+?)'
+        r'\s*[:|]\s*'
+        r'(.+)$'
+    )
+
+    full_text = "\n".join(text_lines) if isinstance(text_lines, list) else text_lines
+
+    for line in full_text.split("\n"):
+        line_stripped = line.strip()
+        if not line_stripped or len(line_stripped) < 5:
+            continue
+        if line_stripped.startswith("--- PAGE"):
+            continue
+
+        m = tabular_line_re.match(line_stripped)
+        if not m:
+            continue
+
+        label_raw = m.group(1).strip()
+        value_raw = m.group(2).strip()
+
+        if len(label_raw) < 3 or not value_raw:
+            continue
+        if value_raw.lower() in {'nil', 'n/a', '-', '--', '---', 'na', '_', '__'}:
+            continue
+        if re.match(r'^[\-_=\.\s]+$', value_raw):
+            continue
+        # Reject if value looks like a timestamp (HH:MM:SS) or contains time component
+        if re.search(r'\d{1,2}:\d{2}:\d{2}', value_raw):
+            continue
+
+        label_norm = re.sub(r'\s+', ' ', label_raw.lower()).strip(' .')
+
+        # Exact alias match
+        canonical = alias_lookup.get(label_norm)
+
+        # Partial alias match (label contains alias or alias contains label)
+        if not canonical:
+            for alias, can in alias_lookup.items():
+                if alias in label_norm or label_norm in alias:
+                    canonical = can
+                    break
+
+        if canonical and canonical not in results:
+            results[canonical] = value_raw.strip()
+
+    return results
+
+
 def clean_noisy_text(text_line):
     """
     Cleans OCR scanning noise, stray characters, and common digit typos (like letter O/o instead of 0).
@@ -188,7 +335,7 @@ def clean_legal_name(name_str):
         "sanjay verma", "delhi transport", "d.t.c", "upsrtc", "mpsrtc", "rsrtc", "corporation", "co-operative"
     ]
     name_lower = name_str.lower()
-    if any(kw in name_lower for kw in IGNORE_KEYWORDS):
+    if any(kw.lower() in name_lower for kw in IGNORE_KEYWORDS):
         return ""
         
     # Strictly reject any name containing inline versus/vs/v. to prevent case title contamination
@@ -254,6 +401,37 @@ def clean_legal_name(name_str):
         return ""
         
     return name_str
+
+
+OCCUPATION_NORMALIZATION = {
+    "coolie": "Daily Wage Labourer",
+    "laborer": "Daily Wage Labourer",
+    "labourer": "Daily Wage Labourer",
+    "daily wager": "Daily Wage Labourer",
+    "daily wage": "Daily Wage Labourer",
+    "agriculturist": "Farmer",
+    "agriculture": "Farmer",
+    "farming": "Farmer",
+    "cultivator": "Farmer",
+    "driver": "Driver",
+    "housewife": "Housewife",
+    "student": "Student",
+    "teacher": "Teacher",
+    "business": "Businessman/Self-Employed",
+    "self employed": "Businessman/Self-Employed",
+    "self-employed": "Businessman/Self-Employed",
+    "shopkeeper": "Shopkeeper",
+    "contractor": "Contractor",
+}
+
+def normalize_occupation(occ_str):
+    if not occ_str:
+        return ""
+    occ_lower = occ_str.lower().strip()
+    for key, normalized in OCCUPATION_NORMALIZATION.items():
+        if key in occ_lower:
+            return normalized
+    return occ_str
 
 
 def determine_name_role(name, text):
@@ -704,6 +882,10 @@ def format_suggestions_for_calculator(suggestions):
             "monthly_income": get_field_val("monthly_income", "monthly_income"),
             "future_prospect": get_field_val("future_prospect", "future_prospect"),
             "place_of_accident": get_field_val("place_of_accident", "place_of_accident"),
+            "fir_number": get_field_val("fir_number", "fir_number"),
+            "policy_number": get_field_val("policy_number", "policy_number"),
+            "vehicle_number": get_field_val("vehicle_number", "vehicle_number"),
+            "insurance_company": get_field_val("insurance_company", "insurance_company"),
         }
     else: # injury case
         fields = {
@@ -722,6 +904,10 @@ def format_suggestions_for_calculator(suggestions):
             "attender_charges": get_field_val("attender_charges", "attender_charges"),
             "future_medical_expenses": get_field_val("future_medical_expenses", "future_medical_expenses"),
             "loss_of_income": get_field_val("loss_of_income", "loss_of_income"),
+            "fir_number": get_field_val("fir_number", "fir_number"),
+            "policy_number": get_field_val("policy_number", "policy_number"),
+            "vehicle_number": get_field_val("vehicle_number", "vehicle_number"),
+            "insurance_company": get_field_val("insurance_company", "insurance_company"),
         }
 
     # Extract total compensation
@@ -1150,6 +1336,60 @@ def contextual_extract(patterns, sections, priority_list, type_cast=str, default
                     if len(final_val) > 2:
                         return final_val, round(confidence, 2), sec_name, matched_page
                         
+    # Targeted raw_ocr document-wide search fallback
+    raw_ocr_text = sections.get("raw_ocr", "")
+    if raw_ocr_text and not any(sec_name == "raw_ocr" for sec_name, _ in priority_list):
+        for pat in patterns:
+            for m in re.finditer(pat, raw_ocr_text, re.IGNORECASE):
+                matched_source = m.group(0)
+                raw_val = m.group(1).strip()
+                
+                active_stop_labels = []
+                for sl in STOP_LABELS:
+                    if field_name == "father_name" and sl in ["s/o", "d/o", "w/o", "son of", "daughter of", "wife of"]:
+                        continue
+                    active_stop_labels.append(sl)
+                    
+                truncated_val = raw_val
+                is_text_field = (type_cast == str) and field_name in ["claimant_name", "deceased_name", "father_name", "occupation", "address"]
+                
+                if is_text_field:
+                    comma_pos = truncated_val.find(",")
+                    if comma_pos != -1:
+                        truncated_val = truncated_val[:comma_pos]
+                newline_pos = re.search(r'[\r\n]', truncated_val)
+                if newline_pos:
+                    truncated_val = truncated_val[:newline_pos.start()]
+                for sl in active_stop_labels:
+                    sl_match = re.search(r'\b' + re.escape(sl) + r'\b', truncated_val, re.IGNORECASE)
+                    if sl_match:
+                        truncated_val = truncated_val[:sl_match.start()]
+                
+                final_val = re.sub(r'\s+', ' ', truncated_val).strip()
+                if is_text_field:
+                    final_val = clean_legal_name(final_val)
+                    
+                if final_val:
+                    matched_page = find_exact_page(final_val, 1, len(pages) if pages else 1, pages) if pages else 1
+                    confidence = 0.50
+                    if is_text_field:
+                        confidence = validate_name_confidence(final_val, confidence)
+                    
+                    if type_cast == float:
+                        val = parse_indian_rupee_value(final_val)
+                        if val > 0:
+                            return val, confidence, "raw_ocr_fallback", matched_page
+                    elif type_cast == int:
+                        digit_match = re.search(r'\d+', final_val)
+                        if digit_match:
+                            try:
+                                return int(digit_match.group(0)), confidence, "raw_ocr_fallback", matched_page
+                            except ValueError:
+                                pass
+                    else:
+                        if len(final_val) > 2:
+                            return final_val, confidence, "raw_ocr_fallback", matched_page
+
     fallback_confidence = 0.30
     return default_val, fallback_confidence, "raw_ocr", 1
 
@@ -1324,6 +1564,12 @@ def parse_extracted_text(text_lines):
     sections_metadata = detect_document_sections(full_text, pages)
     sections = {name: info["content"] for name, info in sections_metadata.items()}
     sections["raw_ocr"] = full_text
+
+    # 3b. MACT Tabular Form Extraction (Label: Value rows in petition forms)
+    # Runs in O(n) with no external dependencies — safe on low-RAM servers
+    tabular_fields = parse_mact_tabular_form(text_lines)
+    if tabular_fields:
+        logger.info(f"Tabular form parser extracted {len(tabular_fields)} fields: {list(tabular_fields.keys())}")
 
     # Populate backward-compatible blocks
     petition_block = sections.get("claimant_section", "") or sections.get("chronological_events_section", "") or sections.get("accident_section", "")
@@ -1527,8 +1773,17 @@ def parse_extracted_text(text_lines):
     # 3. Father / Husband Name
     father_patterns = [
         r'(?:father|husband)\s*(?:s\s*)?name\s*[:\-]\s*(.*)',
-        r'\bs\/o\b\s*(?:shri)?\s*(.*)',
-        r'\bw\/o\b\s*(?:shri)?\s*(.*)'
+        r'(?:father|husband)\s*[/\\]\s*(?:husband|father)\s*(?:name|s\s*name)?\s*[:\-]\s*(.*)',
+        r'\bs[\./\s\\]*o\b\s*(?:shri|late\s+shri|late)?\s*(.*)',
+        r'\bd[\./\s\\]*o\b\s*(?:shri|smt|kumari|late)?\s*(.*)',
+        r'\bw[\./\s\\]*o\b\s*(?:shri|late\s+shri|late)?\s*(.*)',
+        r'\bh[\./\s\\]*o\b\s*(?:shri|late\s+shri|late)?\s*(.*)',
+        r'\bc[\./\s\\]*o\b\s*(?:shri|smt)?\s*(.*)',
+        r'\bson\s+of\b\s*(?:shri|late)?\s*(.*)',
+        r'\bdaughter\s+of\b\s*(?:shri|smt|late)?\s*(.*)',
+        r'\bwife\s+of\b\s*(?:shri|late)?\s*(.*)',
+        r'\bhusband\s+of\b\s*(?:shri|late)?\s*(.*)',
+        r'\bcare\s+of\b\s*(?:shri|smt|late)?\s*(.*)',
     ]
     father_name, conf_father_name, sec_father_name, page_father_name = contextual_extract(
         father_patterns, sections, [("claimant_section", 90), ("memo_of_appeal_section", 80)], type_cast=str,
@@ -1536,6 +1791,17 @@ def parse_extracted_text(text_lines):
     )
     method_father_name = "Section-Aware Contextual Regex"
     if father_name: father_name = father_name.title()
+
+    # Tabular form fallback for father_name
+    if not father_name and tabular_fields.get("father_name"):
+        raw_fn = tabular_fields["father_name"]
+        cleaned_fn = clean_legal_name(raw_fn)
+        if cleaned_fn:
+            father_name = cleaned_fn.title()
+            conf_father_name = 0.88
+            sec_father_name = "tabular_form"
+            page_father_name = 1
+            method_father_name = "Tabular Form Extraction"
 
     # Splitting Claimant Inline Relationship
     source_line = sections.get("claimant_section", "")
@@ -1566,14 +1832,37 @@ def parse_extracted_text(text_lines):
 
     # 4. Age only from claimant/petition section or chronological events
     age_patterns = [
-        r'(?:aged\s+about|age\s+of\s+deceased|aged|approximately)\s*[:\-]?\s*(\d{1,2})\b',
-        r'\b(\d{1,2})\s*years\s*(?:old)?\b'
+        r'(?:aged\s+about|age\s+of\s+deceased|age\s+of\s+injured|age\s+of\s+claimant|aged|approximately)\s*[:\-]?\s*(\d{1,2})\b',
+        r'\b([1-9]\d)\s*years\s*(?:old)?\b',
+        r'\bage\s+at\s+(?:the\s+time\s+of\s+)?accident\s*[:\-]?\s*(\d{1,2})\b',
+        r'\bage\s*[:\-]\s*(\d{1,2})\s*(?:years|yrs)?\b',
+        r'(?:is|was)\s+(\d{1,2})\s+years\s+(?:of\s+age|old)\b',
+        r'\bage\s*[:\-]?\s*(\d{1,2})\b',
+        r'\baged\s+(\d{1,2})\b',
+        r'\bdate\s+of\s+accident\s+age\s*[:\-]?\s*(\d{1,2})\b',
     ]
     age, conf_age, sec_age, page_age = contextual_extract(
         age_patterns, sections, [("claimant_section", 95), ("chronological_events_section", 80)], default_val="", type_cast=int,
         field_name="age", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
     )
     method_age = "Section-Aware Contextual Regex"
+    # Guard: reject implausible ages (e.g. paragraph numbers matched as age)
+    if isinstance(age, int) and age < 6:
+        age = ""
+        conf_age = 0.0
+        sec_age = "raw_ocr"
+        method_age = "Fallback"
+
+    # Tabular form fallback for age
+    if not age and tabular_fields.get("age"):
+        age_raw = tabular_fields["age"]
+        age_m = re.search(r'(\d{1,2})', age_raw)
+        if age_m and int(age_m.group(1)) >= 6:
+            age = int(age_m.group(1))
+            conf_age = 0.88
+            sec_age = "tabular_form"
+            page_age = 1
+            method_age = "Tabular Form Extraction"
 
     # Deceased Block Extraction (Age)
     deceased_age_match = re.search(
@@ -1600,14 +1889,33 @@ def parse_extracted_text(text_lines):
         r'occupation\s*[:\-]\s*(.*)',
         r'employed\s+as\s+(.*)',
         r'working\s+as\s+(.*)',
-        r'earning\s+as\s+(.*)'
+        r'earning\s+as\s+(.*)',
+        r'profession\s*[:\-]\s*(.*)',
+        r'trade\s*[:\-]\s*(.*)',
+        r'vocation\s*[:\-]\s*(.*)',
+        r'nature\s+of\s+(?:work|job|employment)\s*[:\-]\s*(.*)',
+        r'by\s+(?:profession|occupation|trade)\b\s*(?:is\s+a?|was\s+a?)?\s*(.*)',
+        r'(?:he|she)\s+(?:was|is)\s+(?:a|an)\s+([A-Za-z][A-Za-z\s]+?)\s+(?:by\s+(?:profession|occupation)|earning|working)',
+        r'\bby\s+occupation\s+(?:is|was)?\s*(.*)',
+        r'\bself\s+employed\b\s*(.*)',
+        r'\bself-employed\b\s*(.*)',
     ]
     occupation, conf_occupation, sec_occupation, page_occupation = contextual_extract(
         occ_patterns, sections, [("claimant_section", 90), ("memo_of_appeal_section", 80)], default_val="", type_cast=str,
         field_name="occupation", debug_info=parser_debug, pages=pages, sections_metadata=sections_metadata, page_importances=page_importances
     )
     method_occupation = "Section-Aware Contextual Regex"
-    if occupation: occupation = occupation.title()
+    if occupation: occupation = normalize_occupation(occupation).title()
+
+    # Tabular form fallback for occupation
+    if not occupation and tabular_fields.get("occupation"):
+        occ_raw = clean_legal_name(tabular_fields["occupation"])
+        if occ_raw and len(occ_raw) > 1:
+            occupation = normalize_occupation(occ_raw).title()
+            conf_occupation = 0.88
+            sec_occupation = "tabular_form"
+            page_occupation = 1
+            method_occupation = "Tabular Form Extraction"
 
     # Deceased Block Extraction (Occupation)
     deceased_occ_match = re.search(
@@ -1616,7 +1924,7 @@ def parse_extracted_text(text_lines):
         re.IGNORECASE | re.DOTALL
     )
     if deceased_occ_match:
-        occupation = deceased_occ_match.group(1).strip().title()
+        occupation = normalize_occupation(deceased_occ_match.group(1).strip()).title()
         conf_occupation = 0.99
         sec_occupation = "compensation_section"
         page_occupation = find_exact_page(occupation, 1, len(pages), pages) if pages else 8
@@ -1631,9 +1939,18 @@ def parse_extracted_text(text_lines):
 
     # 6. Place of accident
     place_regexes = [
-        r'place\s+of\s+(?:accident|occurrence)\s*[:\-]\s*(.*)',
-        r'accident\s+(?:occurred|took\s+place)\s+at\s+(.*)',
-        r'accident\s+near\s+(.*)'
+        r'place\s+of\s+(?:accident|occurrence|incident|mishap)\s*[:\-]\s*(.*)',
+        r'accident\s+(?:occurred|took\s+place)\s+(?:at|near|on)\s+(.*)',
+        r'accident\s+near\s+(.*)',
+        r'on\s+(?:national\s+highway|state\s+highway|nh|sh)\s*(?:no\.?|number)?\s*[\-\s]?\s*\d+[A-Za-z]?\b.*?(?:near|at|between)?\s*(.*)',
+        r'(?:nh|sh)[\-\s]*\d+[A-Za-z]?\s+(?:near|at)\s+(.*)',
+        r'at\s+(?:village|town|city|chowk|crossing|junction)\s+([A-Za-z][\w\s,]+)',
+        r'near\s+(?:village|gram|town|city|hospital|school|police\s+station)\s+([A-Za-z][\w\s,]+)',
+        r'on\s+the\s+(?:road|highway|street)\s+(?:near|at|between|from)\s+(.*)',
+        r'road\s+accident\s+(?:at|near|on)\s+(.*)',
+        r'\baccident\s+took\s+place\s+on\s+(.*)',
+        r'\baccident\s+took\s+place\s+at\s+(.*)',
+        r'\bspot\s+of\s+accident\s*[:\-]\s*(.*)',
     ]
     place_of_accident, conf_place_of_accident, sec_place_of_accident, page_place_of_accident = contextual_extract(
         place_regexes, sections, [("accident_section", 95), ("chronological_events_section", 90)], default_val="", type_cast=str,
@@ -1641,6 +1958,14 @@ def parse_extracted_text(text_lines):
     )
     method_place_of_accident = "Section-Aware Contextual Regex"
     if place_of_accident: place_of_accident = place_of_accident.title()
+
+    # Tabular form fallback for place_of_accident
+    if not place_of_accident and tabular_fields.get("place_of_accident"):
+        place_of_accident = tabular_fields["place_of_accident"].title()
+        conf_place_of_accident = 0.88
+        sec_place_of_accident = "tabular_form"
+        page_place_of_accident = 1
+        method_place_of_accident = "Tabular Form Extraction"
 
     # 7. Dependents only from claimant/petition section
     dependents_patterns = [
@@ -1814,7 +2139,125 @@ def parse_extracted_text(text_lines):
     )
     method_estate_loss = "Section-Aware Contextual Regex"
 
-    # 10. Prayer Amount / Prayer Section
+    # ======================================================
+    # 10. NEW STRUCTURED FIELDS: FIR, Policy, Vehicle, Insurance
+    # ======================================================
+
+    # 10a. FIR Number
+    _fir_patterns = [
+        r'\b(?:fir|f\s*\.\s*i\s*\.\s*r\s*\.?)\s*(?:no\.?|number|#)\s*[:\-]?\s*([\w/\-]+(?:/\d{4})?)',
+        r'\b(?:fir|f\s*\.\s*i\s*\.\s*r\s*\.?)\s*(?:no\.?|number|#)?\s*[:\-]?\s*([\w/\-]+(?:\s+of\s+\d{4})?)',
+        r'\bcrime\s*(?:no\.?|number)\s*[:\-]?\s*([\w/\-]+(?:/\d{4})?)',
+        r'\b(?:crime|cr)\s*(?:case\s*)?(?:no\.?|number)\s*[:\-]?\s*([\w/\-]+(?:\s+of\s+\d{4})?)',
+        r'\bcr\.?\s*(?:no\.?|case\s*no\.?)\s*[:\-]?\s*([\w/\-]+)',
+        r'\bpolice\s+(?:station\s+)?report\s*(?:no\.?|number)?\s*[:\-]?\s*([\w/\-]+)',
+    ]
+    fir_number = ""
+    conf_fir_number = 0.0
+    for _pat in _fir_patterns:
+        _m = re.search(_pat, full_text, re.IGNORECASE)
+        if _m:
+            fir_number = _m.group(1).strip().upper()
+            fir_number = re.sub(r'[^A-Z0-9/\-\s]', '', fir_number).strip()
+            conf_fir_number = 0.85
+            break
+    if not fir_number and tabular_fields.get("fir_number"):
+        fir_number = tabular_fields["fir_number"]
+        conf_fir_number = 0.90
+
+    # 10b. Policy Number
+    _policy_patterns = [
+        r'\bpolicy\s*(?:no\.?|number|#)\s*[:\-]?\s*([\w\-\./]+)',
+        r'\bpolicy\s+bearing\s*(?:no\.?|number)?\s*[:\-]?\s*([\w\-\./]+)',
+        r'\binsurance\s+policy\s*(?:no\.?|number|#)\s*[:\-]?\s*([\w\-\./]+)',
+        r'\bcover\s*(?:note)?\s*(?:no\.?|number)?\s*[:\-]?\s*([\w\-\./]+)',
+    ]
+    policy_number = ""
+    conf_policy_number = 0.0
+    for _pat in _policy_patterns:
+        _m = re.search(_pat, full_text, re.IGNORECASE)
+        if _m:
+            policy_number = _m.group(1).strip()
+            policy_number = re.sub(r'[^a-zA-Z0-9\-\./\s]', '', policy_number).strip()
+            conf_policy_number = 0.85
+            break
+    if not policy_number and tabular_fields.get("policy_number"):
+        policy_number = tabular_fields["policy_number"]
+        conf_policy_number = 0.90
+
+    # 10c. Vehicle / Registration Number (Indian format: AB 00 CD 0000)
+    _veh_num_re = r'[A-Za-z|l|I|1]{2}[\s\-\.]?\d{1,2}[\s\-\.]?[A-Za-z0-9|l|I|1]{1,4}[\s\-\.]?\d{1,4}'
+    _vehicle_patterns = [
+        rf'\b(?:vehicle|veh\.?)\s*(?:reg(?:istration)?\.?)?\s*(?:no\.?|number)\s*[:\-]?\s*({_veh_num_re})',
+        rf'\breg(?:istration)?\.?\s*(?:no\.?|number)\s*[:\-]?\s*({_veh_num_re})',
+        rf'\bbearing\s+(?:reg(?:istration)?\.?\s*)?(?:no\.?|number)\s*[:\-]?\s*({_veh_num_re})',
+        rf'(?:car|truck|bus|lorry|motorcycle|bike|tempo|jeep|auto|motor\s*cycle)\s*(?:no\.?|number|bearing)?\s*[:\-]?\s*({_veh_num_re})',
+        rf'\boffending\s+vehicle\b.*?({_veh_num_re})',
+    ]
+    vehicle_number = ""
+    conf_vehicle_number = 0.0
+    for _pat in _vehicle_patterns:
+        _m = re.search(_pat, full_text, re.IGNORECASE)
+        if _m:
+            raw_veh = _m.group(1).strip().upper()
+            cleaned_veh = re.sub(r'[^A-Z0-9\-\s\.]', '', raw_veh)
+            vehicle_number = re.sub(r'\s+', ' ', cleaned_veh).strip()
+            conf_vehicle_number = 0.85
+            break
+    if not vehicle_number and tabular_fields.get("vehicle_number"):
+        _veh_raw = tabular_fields["vehicle_number"]
+        _veh_m = re.search(_veh_num_re, _veh_raw, re.IGNORECASE)
+        vehicle_number = _veh_m.group(0).upper() if _veh_m else _veh_raw
+        vehicle_number = re.sub(r'[^A-Z0-9\-\s\.]', '', vehicle_number).strip()
+        conf_vehicle_number = 0.90
+
+    # 10d. Insurance Company
+    _known_insurers = [
+        "national insurance", "oriental insurance", "new india assurance",
+        "united india insurance", "bajaj allianz", "hdfc ergo", "icici lombard",
+        "reliance general", "tata aig", "cholamandalam", "future generali",
+        "iffco tokio", "universal sompo", "royal sundaram", "magma hdi",
+        "shriram general", "sbi general", "go digit", "acko general",
+        "united india", "oriental insurance co", "national insurance co",
+        "chola ms", "icici lombard general", "bajaj allianz general",
+        "tata aig general", "reliance general insurance", "sbi general insurance",
+        "iffco-tokio", "shriram general insurance"
+    ]
+    insurance_company = ""
+    conf_insurance_company = 0.0
+    for _ins_name in _known_insurers:
+        if _ins_name.lower() in full_text_lower:
+            _ins_m = re.search(
+                rf'({re.escape(_ins_name)}[A-Za-z\s\.\,&]*?(?:co\.?|ltd\.?|corporation|company|insurance)?)',
+                full_text, re.IGNORECASE
+            )
+            if _ins_m:
+                insurance_company = _ins_m.group(1).strip().title()
+                insurance_company = re.sub(r'[^a-zA-Z\s\.\,\&]', '', insurance_company).strip()
+                conf_insurance_company = 0.90
+                break
+    if not insurance_company:
+        _ins_patterns = [
+            r'(?:insurance\s+company|insurer)\s*[:\-]\s*([A-Za-z][A-Za-z\s\.\,&]+?(?:ltd\.?|limited|corporation|co\.?|company))(?:\.|,|\n|$)',
+            r'(?:respondent|opposite\s+party)\s*(?:no\.?\s*\d+)?\s*[:\-]\s*([A-Za-z][A-Za-z\s\.\,&]*?insurance(?:\s+(?:co(?:mpany)?|ltd|limited|corp|corporation))?)\b',
+        ]
+        for _pat in _ins_patterns:
+            _ins_m = re.search(_pat, full_text, re.IGNORECASE)
+            if _ins_m:
+                _cand = _ins_m.group(1).strip()
+                if len(_cand) <= 60:
+                    insurance_company = _cand.title()
+                    insurance_company = re.sub(r'[^a-zA-Z\s\.\,\&]', '', insurance_company).strip()
+                    conf_insurance_company = 0.75
+                    break
+    if not insurance_company and tabular_fields.get("insurance_company"):
+        _ins_tab_val = tabular_fields["insurance_company"]
+        if not re.search(r'[|\[\]{}\\]', _ins_tab_val) and _ins_tab_val.isascii() and len(_ins_tab_val) <= 80:
+            insurance_company = _ins_tab_val
+            insurance_company = re.sub(r'[^a-zA-Z\s\.\,\&]', '', insurance_company).strip()
+            conf_insurance_company = 0.85
+
+    # 10e. Prayer Amount / Prayer Section
     prayer_patterns = [
         r'(?:prayer|relief\s+claimed|claims?\s+compensation\s+of|prays\s+for)\s*(?:rs\.?|inr)?\s*([\d,\.\s]+lakhs?|[\d,\.\-\/]+)\b',
         r'\b(?:claims?\s+sum\s+of|seeking\s+compensation\s+of)\s*(?:rs\.?|inr)?\s*([\d,\.\-\/]+)\b'
@@ -1864,12 +2307,87 @@ def parse_extracted_text(text_lines):
     
     dob_dates = extract_dates_with_context(sections.get("claimant_section", "") or full_text)
     for d_val, ctx in dob_dates:
-        if any(kw in ctx for kw in ["dob", "date of birth", "born on", "birth", "d.o.b"]):
+        if any(kw in ctx for kw in ["dob", "date of birth", "born on", "birth", "d.o.b",
+                                    "dob:", "d.o.b.", "birth date", "date of birth of"]):
             date_of_birth = d_val
             conf_date_of_birth = 0.95
             sec_date_of_birth = "claimant_section" if d_val in sections.get("claimant_section", "") else "raw_ocr"
             page_date_of_birth = find_exact_page(d_val, 1, 10, pages)
             break
+
+    # Tabular form fallback for date_of_birth
+    if not date_of_birth and tabular_fields.get("date_of_birth"):
+        _dob_raw = tabular_fields["date_of_birth"]
+        _dob_m = re.search(r'(\d{1,2})[/\.\-](\d{1,2})[/\.\-](\d{4})', _dob_raw)
+        if _dob_m:
+            date_of_birth = f"{int(_dob_m.group(1)):02d}-{int(_dob_m.group(2)):02d}-{_dob_m.group(3)}"
+            conf_date_of_birth = 0.90
+            sec_date_of_birth = "tabular_form"
+            page_date_of_birth = 1
+            method_date_of_birth = "Tabular Form Extraction"
+
+    # Tabular form fallback for date_of_accident
+    if not date_of_accident and tabular_fields.get("date_of_accident"):
+        _doa_raw = tabular_fields["date_of_accident"]
+        _doa_m = re.search(r'(\d{1,2})[/\.\-](\d{1,2})[/\.\-](\d{4})', _doa_raw)
+        if _doa_m:
+            date_of_accident = f"{int(_doa_m.group(1)):02d}-{int(_doa_m.group(2)):02d}-{_doa_m.group(3)}"
+            conf_date_of_accident = 0.90
+            sec_date_of_accident = "tabular_form"
+            page_date_of_accident = 1
+            method_date_of_accident = "Tabular Form Extraction"
+
+    # Tabular form fallback for claimant_name / deceased_name
+    if not claimant_name and tabular_fields.get("claimant_name"):
+        _cn_raw = clean_legal_name(tabular_fields["claimant_name"])
+        if _cn_raw and len(_cn_raw) > 2:
+            claimant_name = _cn_raw.title()
+            conf_claimant_name = max(conf_claimant_name, 0.88)
+            sec_claimant_name = "tabular_form"
+            page_claimant_name = 1
+            method_claimant_name = "Tabular Form Extraction"
+    if not deceased_name and tabular_fields.get("deceased_name"):
+        _dn_raw = clean_legal_name(tabular_fields["deceased_name"])
+        if _dn_raw and len(_dn_raw) > 2:
+            deceased_name = _dn_raw.title()
+            conf_deceased_name = max(conf_deceased_name, 0.88)
+            sec_deceased_name = "tabular_form"
+            page_deceased_name = 1
+            method_deceased_name = "Tabular Form Extraction"
+
+    # Tabular form fallback for monthly_income
+    if not monthly_income and tabular_fields.get("monthly_income"):
+        _inc_val = parse_indian_rupee_value(tabular_fields["monthly_income"])
+        if _inc_val > 0:
+            monthly_income = _inc_val
+            conf_monthly_income = 0.88
+            sec_monthly_income = "tabular_form"
+            page_monthly_income = 1
+            method_monthly_income = "Tabular Form Extraction"
+
+    # Tabular form fallback for dependents
+    if not dependents and tabular_fields.get("dependents"):
+        _dep_m = re.search(r'(\d{1,2})', tabular_fields["dependents"])
+        if _dep_m:
+            dependents = int(_dep_m.group(1))
+            conf_dependents = 0.88
+            sec_dependents = "tabular_form"
+            page_dependents = 1
+            method_dependents = "Tabular Form Extraction"
+
+    # Tabular form fallback for marital_status
+    if conf_marital_status < 0.70 and tabular_fields.get("marital_status"):
+        _ms_raw = tabular_fields["marital_status"].lower()
+        if any(kw in _ms_raw for kw in ["married", "husband", "wife", "spouse"]):
+            marital_status = "married"
+            conf_marital_status = 0.88
+            sec_marital_status = "tabular_form"
+            method_marital_status = "Tabular Form Extraction"
+        elif any(kw in _ms_raw for kw in ["single", "unmarried", "bachelor", "spinster"]):
+            marital_status = "single"
+            conf_marital_status = 0.88
+            sec_marital_status = "tabular_form"
+            method_marital_status = "Tabular Form Extraction"
 
     # ======================================================
     # NORMALIZATION & VALIDATION (unchanged legal logic)
@@ -2407,7 +2925,13 @@ def parse_extracted_text(text_lines):
         "is_tamil_nadu": is_tamil_nadu,
         "mcop_number": mcop_number,
         "compensation_table": compensation_table,
-        
+
+        # Structured identifier fields (Priority 2 — alias-based extraction)
+        "fir_number": fir_number,
+        "policy_number": policy_number,
+        "vehicle_number": vehicle_number,
+        "insurance_company": insurance_company,
+
         "ai_recovery_triggered": ai_recovery_triggered,
         "legal_ai_summary": legal_ai_summary,
         "anomalies_detected": anomalies_detected,
@@ -2557,6 +3081,38 @@ def parse_extracted_text(text_lines):
                 "source_section": sec_disability,
                 "source_page": page_disability,
                 "extraction_method": method_disability
+            },
+            "fir_number": {
+                "value": fir_number,
+                "confidence": conf_fir_number,
+                "source": "raw_ocr",
+                "source_section": "raw_ocr",
+                "source_page": 1,
+                "extraction_method": "Regex Pattern Matching"
+            },
+            "policy_number": {
+                "value": policy_number,
+                "confidence": conf_policy_number,
+                "source": "raw_ocr",
+                "source_section": "raw_ocr",
+                "source_page": 1,
+                "extraction_method": "Regex Pattern Matching"
+            },
+            "vehicle_number": {
+                "value": vehicle_number,
+                "confidence": conf_vehicle_number,
+                "source": "raw_ocr",
+                "source_section": "raw_ocr",
+                "source_page": 1,
+                "extraction_method": "Regex Pattern Matching"
+            },
+            "insurance_company": {
+                "value": insurance_company,
+                "confidence": conf_insurance_company,
+                "source": "raw_ocr",
+                "source_section": "raw_ocr",
+                "source_page": 1,
+                "extraction_method": "Known Insurer + Regex Matching"
             },
             "dependents": {
                 "value": dependents,
