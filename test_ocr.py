@@ -61,7 +61,12 @@ def test_ocr_and_parsing():
     try:
         print("\nLoading PaddleOCR (will download model if running for the first time)...")
         from paddleocr import PaddleOCR
-        ocr = PaddleOCR(lang='en', enable_mkldnn=False)
+        ocr = PaddleOCR(
+            enable_mkldnn=False,
+            use_textline_orientation=True,
+            text_detection_model_name='PP-OCRv5_mobile_det',
+            text_recognition_model_name='en_PP-OCRv5_mobile_rec'
+        )
         print("PaddleOCR loaded successfully!")
         
         print(f"\nRunning OCR scanning on {img_path}...")

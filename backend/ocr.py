@@ -16,9 +16,9 @@ import pypdfium2 as pdfium
 
 # Optimize PaddlePaddle and system memory footprints to prevent OOM process kills on low-RAM VPS servers
 os.environ["FLAGS_allocator_strategy"] = "naive_best_fit"
-os.environ["OMP_NUM_THREADS"] = "4"
-os.environ["MKL_NUM_THREADS"] = "4"
-os.environ["OMP_THREAD_LIMIT"] = "4"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OMP_THREAD_LIMIT"] = "1"
 
 from backend.parser_heuristics import parse_extracted_text
 from backend.vector_db import index_document, COLLECTION_NAME
@@ -34,8 +34,7 @@ OCR_PRIMARY_ENGINE = os.getenv("OCR_PRIMARY_ENGINE", "paddle").lower()  # 'paddl
 OCR_RENDER_DPI = int(os.getenv("OCR_RENDER_DPI", "144"))
 OCR_PAGE_TIMEOUT = float(os.getenv("OCR_PAGE_TIMEOUT", "60"))
 OCR_MAX_PAGES_FIRST_PASS = int(os.getenv("OCR_MAX_PAGES_FIRST_PASS", "10"))
-OCR_FIRST_PAGES_TO_SCAN = int(os.getenv("OCR_FIRST_PAGES_TO_SCAN", "8"))
-OCR_LAST_PAGES_TO_SCAN = int(os.getenv("OCR_LAST_PAGES_TO_SCAN", "8"))
+OCR_MAX_PARALLEL_WORKERS = int(os.getenv("OCR_MAX_PARALLEL_WORKERS", "4"))
 OCR_RETRY_DPI = int(os.getenv("OCR_RETRY_DPI", "180"))
 DEBUG_OCR = os.getenv("DEBUG_OCR", "false").lower() == "true"
 
@@ -66,9 +65,14 @@ def get_ocr_instance():
     global _ocr_instance, OCR_INITIALIZED
     if _ocr_instance is None:
         try:
-            logger.info("Initializing PaddleOCR Singleton (disabling MKLDNN to avoid PIR crashes)...")
+            logger.info("Initializing PaddleOCR Singleton (using mobile models and disabling MKLDNN)...")
             from paddleocr import PaddleOCR
-            _ocr_instance = PaddleOCR(lang='en', enable_mkldnn=False, use_angle_cls=False)
+            _ocr_instance = PaddleOCR(
+                enable_mkldnn=False,
+                use_textline_orientation=True,
+                text_detection_model_name="PP-OCRv5_mobile_det",
+                text_recognition_model_name="en_PP-OCRv5_mobile_rec"
+            )
             OCR_INITIALIZED = True
             logger.info("PaddleOCR Singleton successfully loaded!")
         except Exception as e:
@@ -993,86 +997,51 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
         del temp_doc
         gc.collect()
 
-        logger.info(f"Scanned PDF '{file_path}' ({total_pages} pages): sequential stable OCR pipeline...")
+        logger.info(f"Scanned PDF '{file_path}' ({total_pages} pages): starting parallel mobile OCR pipeline (workers={OCR_MAX_PARALLEL_WORKERS})...")
 
         page_results = {} # page_idx -> (lines, page_meta)
-        
-        # Determine selective page set if scan_all_pages is False
-        if not scan_all_pages and total_pages > (OCR_FIRST_PAGES_TO_SCAN + OCR_LAST_PAGES_TO_SCAN):
-            pages_to_scan = set(list(range(0, OCR_FIRST_PAGES_TO_SCAN)) + list(range(total_pages - OCR_LAST_PAGES_TO_SCAN, total_pages)))
-            logger.info(f"Selective scanning active: will scan first {OCR_FIRST_PAGES_TO_SCAN} pages and last {OCR_LAST_PAGES_TO_SCAN} pages. Total scanned: {len(pages_to_scan)}/{total_pages}")
-        else:
-            pages_to_scan = set(range(total_pages))
-
-        chunk_size = 10
         total_ocr_duration = 0.0
 
-        for chunk_start in range(0, total_pages, chunk_size):
-            chunk_end = min(chunk_start + chunk_size, total_pages)
-            
-            # Check if this chunk contains any pages we actually need to scan
-            chunk_pages_to_scan = [p for p in range(chunk_start, chunk_end) if p in pages_to_scan]
-            if not chunk_pages_to_scan:
-                # Bypass opening the PDF document for this chunk and populate with skipped metadata
-                for idx in range(chunk_start, chunk_end):
-                    page_num = idx + 1
-                    page_results[idx] = ([], {
-                        "page": page_num,
-                        "engine": "Skipped-non-critical",
-                        "dpi": 0,
-                        "confidence": 1.0,
-                        "text_length": 0,
-                        "quality_score": 0.0,
-                        "preprocessing_applied": [],
-                        "lines": 0,
-                        "ocr_boxes": [],
-                        "render_time": 0.0,
-                        "ocr_time": 0.0,
-                        "total_page_time": 0.0
-                    })
-                if progress_callback:
-                    progress_callback(int((chunk_end / total_pages) * 95))
-                continue
+        import concurrent.futures
 
-            logger.info(f"--- Processing PDF chunk: pages {chunk_start + 1} to {chunk_end} of {total_pages} ---")
-            
-            # Open PDF document for this chunk
-            doc = pdfium.PdfDocument(file_path)
-            
-            for idx in range(chunk_start, chunk_end):
+        def process_page(idx):
+            try:
+                # perform_ocr_page_stable manages rendering (independent doc opening), classifier, preprocessing, PaddleOCR, and fallback
+                lines, page_meta = perform_ocr_page_stable(
+                    ocr_engine, None, idx, total_pages, pdf_path=file_path, dpi=OCR_RENDER_DPI, fitz_text_cache=fitz_text_cache
+                )
+                return idx, lines, page_meta
+            except Exception as ex:
+                logger.error(f"Error during parallel OCR on page {idx+1}: {ex}")
                 page_num = idx + 1
-                if idx in pages_to_scan:
-                    page_lines, page_meta = perform_ocr_page_stable(
-                        ocr_engine, doc[idx], idx, total_pages, pdf_path=file_path, dpi=OCR_RENDER_DPI, fitz_text_cache=fitz_text_cache
-                    )
-                    page_results[idx] = (page_lines, page_meta)
-                    
-                    # Accumulate OCR time
-                    if "ocr_time" in page_meta:
-                        total_ocr_duration += page_meta["ocr_time"]
-                else:
-                    page_results[idx] = ([], {
-                        "page": page_num,
-                        "engine": "Skipped-non-critical",
-                        "dpi": 0,
-                        "confidence": 1.0,
-                        "text_length": 0,
-                        "quality_score": 0.0,
-                        "preprocessing_applied": [],
-                        "lines": 0,
-                        "ocr_boxes": [],
-                        "render_time": 0.0,
-                        "ocr_time": 0.0,
-                        "total_page_time": 0.0
-                    })
+                meta = {
+                    "page": page_num,
+                    "engine": "Error",
+                    "dpi": OCR_RENDER_DPI,
+                    "confidence": 0.0,
+                    "text_length": 0,
+                    "quality_score": 0.0,
+                    "preprocessing_applied": [],
+                    "lines": 0,
+                    "ocr_boxes": [],
+                    "render_time": 0.0,
+                    "ocr_time": 0.0,
+                    "total_page_time": 0.0
+                }
+                return idx, [], meta
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=OCR_MAX_PARALLEL_WORKERS) as executor:
+            futures = [executor.submit(process_page, idx) for idx in range(total_pages)]
+            
+            for future in concurrent.futures.as_completed(futures):
+                idx, page_lines, page_meta = future.result()
+                page_results[idx] = (page_lines, page_meta)
+                
+                if "ocr_time" in page_meta:
+                    total_ocr_duration += page_meta["ocr_time"]
                 
                 if progress_callback:
-                    progress_callback(int(((idx + 1) / total_pages) * 95))
-            
-            # Close PDF document and release resources for this chunk
-            doc.close()
-            del doc
-            gc.collect()
+                    progress_callback(int((len(page_results) / total_pages) * 95))
 
         # Log total performance stats
         avg_ocr_time = total_ocr_duration / total_pages if total_pages else 0.0
