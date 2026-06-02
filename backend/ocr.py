@@ -16,9 +16,9 @@ import pypdfium2 as pdfium
 
 # Optimize PaddlePaddle and system memory footprints to prevent OOM process kills on low-RAM VPS servers
 os.environ["FLAGS_allocator_strategy"] = "naive_best_fit"
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OMP_THREAD_LIMIT"] = "1"
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
+os.environ["OMP_THREAD_LIMIT"] = "4"
 
 from backend.parser_heuristics import parse_extracted_text
 from backend.vector_db import index_document, COLLECTION_NAME
