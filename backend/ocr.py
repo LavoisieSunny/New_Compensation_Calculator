@@ -34,6 +34,8 @@ OCR_PRIMARY_ENGINE = os.getenv("OCR_PRIMARY_ENGINE", "paddle").lower()  # 'paddl
 OCR_RENDER_DPI = int(os.getenv("OCR_RENDER_DPI", "144"))
 OCR_PAGE_TIMEOUT = float(os.getenv("OCR_PAGE_TIMEOUT", "60"))
 OCR_MAX_PAGES_FIRST_PASS = int(os.getenv("OCR_MAX_PAGES_FIRST_PASS", "10"))
+OCR_FIRST_PAGES_TO_SCAN = int(os.getenv("OCR_FIRST_PAGES_TO_SCAN", "8"))
+OCR_LAST_PAGES_TO_SCAN = int(os.getenv("OCR_LAST_PAGES_TO_SCAN", "8"))
 OCR_RETRY_DPI = int(os.getenv("OCR_RETRY_DPI", "180"))
 DEBUG_OCR = os.getenv("DEBUG_OCR", "false").lower() == "true"
 
@@ -994,25 +996,75 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
         logger.info(f"Scanned PDF '{file_path}' ({total_pages} pages): sequential stable OCR pipeline...")
 
         page_results = {} # page_idx -> (lines, page_meta)
+        
+        # Determine selective page set if scan_all_pages is False
+        if not scan_all_pages and total_pages > (OCR_FIRST_PAGES_TO_SCAN + OCR_LAST_PAGES_TO_SCAN):
+            pages_to_scan = set(list(range(0, OCR_FIRST_PAGES_TO_SCAN)) + list(range(total_pages - OCR_LAST_PAGES_TO_SCAN, total_pages)))
+            logger.info(f"Selective scanning active: will scan first {OCR_FIRST_PAGES_TO_SCAN} pages and last {OCR_LAST_PAGES_TO_SCAN} pages. Total scanned: {len(pages_to_scan)}/{total_pages}")
+        else:
+            pages_to_scan = set(range(total_pages))
+
         chunk_size = 10
         total_ocr_duration = 0.0
 
         for chunk_start in range(0, total_pages, chunk_size):
             chunk_end = min(chunk_start + chunk_size, total_pages)
+            
+            # Check if this chunk contains any pages we actually need to scan
+            chunk_pages_to_scan = [p for p in range(chunk_start, chunk_end) if p in pages_to_scan]
+            if not chunk_pages_to_scan:
+                # Bypass opening the PDF document for this chunk and populate with skipped metadata
+                for idx in range(chunk_start, chunk_end):
+                    page_num = idx + 1
+                    page_results[idx] = ([], {
+                        "page": page_num,
+                        "engine": "Skipped-non-critical",
+                        "dpi": 0,
+                        "confidence": 1.0,
+                        "text_length": 0,
+                        "quality_score": 0.0,
+                        "preprocessing_applied": [],
+                        "lines": 0,
+                        "ocr_boxes": [],
+                        "render_time": 0.0,
+                        "ocr_time": 0.0,
+                        "total_page_time": 0.0
+                    })
+                if progress_callback:
+                    progress_callback(int((chunk_end / total_pages) * 95))
+                continue
+
             logger.info(f"--- Processing PDF chunk: pages {chunk_start + 1} to {chunk_end} of {total_pages} ---")
             
             # Open PDF document for this chunk
             doc = pdfium.PdfDocument(file_path)
             
             for idx in range(chunk_start, chunk_end):
-                page_lines, page_meta = perform_ocr_page_stable(
-                    ocr_engine, doc[idx], idx, total_pages, pdf_path=file_path, dpi=OCR_RENDER_DPI, fitz_text_cache=fitz_text_cache
-                )
-                page_results[idx] = (page_lines, page_meta)
-                
-                # Accumulate OCR time
-                if "ocr_time" in page_meta:
-                    total_ocr_duration += page_meta["ocr_time"]
+                page_num = idx + 1
+                if idx in pages_to_scan:
+                    page_lines, page_meta = perform_ocr_page_stable(
+                        ocr_engine, doc[idx], idx, total_pages, pdf_path=file_path, dpi=OCR_RENDER_DPI, fitz_text_cache=fitz_text_cache
+                    )
+                    page_results[idx] = (page_lines, page_meta)
+                    
+                    # Accumulate OCR time
+                    if "ocr_time" in page_meta:
+                        total_ocr_duration += page_meta["ocr_time"]
+                else:
+                    page_results[idx] = ([], {
+                        "page": page_num,
+                        "engine": "Skipped-non-critical",
+                        "dpi": 0,
+                        "confidence": 1.0,
+                        "text_length": 0,
+                        "quality_score": 0.0,
+                        "preprocessing_applied": [],
+                        "lines": 0,
+                        "ocr_boxes": [],
+                        "render_time": 0.0,
+                        "ocr_time": 0.0,
+                        "total_page_time": 0.0
+                    })
                 
                 if progress_callback:
                     progress_callback(int(((idx + 1) / total_pages) * 95))
