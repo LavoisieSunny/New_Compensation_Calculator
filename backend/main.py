@@ -34,6 +34,10 @@ async def startup_event():
         
         # Initialize Qdrant Client and collection safety dynamically
         get_qdrant_client()
+
+        # Warm up PaddleOCR singleton model
+        from backend.ocr import get_ocr_instance
+        get_ocr_instance()
     except Exception as e:
         logger.error(f"Startup check failed: {str(e)}")
 

@@ -19,9 +19,7 @@ import pypdfium2 as pdfium
 
 # Optimize PaddlePaddle and system memory footprints to prevent OOM process kills on low-RAM VPS servers
 os.environ["FLAGS_allocator_strategy"] = "naive_best_fit"
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OMP_THREAD_LIMIT"] = "1"
+
 
 from backend.parser_heuristics import parse_extracted_text
 from backend.vector_db import index_document, COLLECTION_NAME
@@ -34,11 +32,11 @@ router = APIRouter()
 
 # Configurable OCR Options (Phase 1 stabilization)
 OCR_PRIMARY_ENGINE = os.getenv("OCR_PRIMARY_ENGINE", "paddle").lower()  # 'paddle' or 'tesseract'
-OCR_RENDER_DPI = int(os.getenv("OCR_RENDER_DPI", "144"))
+OCR_RENDER_DPI = int(os.getenv("OCR_RENDER_DPI", "180"))
 OCR_PAGE_TIMEOUT = float(os.getenv("OCR_PAGE_TIMEOUT", "60"))
 OCR_MAX_PAGES_FIRST_PASS = int(os.getenv("OCR_MAX_PAGES_FIRST_PASS", "10"))
-OCR_MAX_PARALLEL_WORKERS = int(os.getenv("OCR_MAX_PARALLEL_WORKERS", "4"))
-OCR_RETRY_DPI = int(os.getenv("OCR_RETRY_DPI", "180"))
+OCR_MAX_PARALLEL_WORKERS = int(os.getenv("OCR_MAX_PARALLEL_WORKERS", "8"))
+OCR_RETRY_DPI = int(os.getenv("OCR_RETRY_DPI", "216"))
 DEBUG_OCR = os.getenv("DEBUG_OCR", "false").lower() == "true"
 
 # Global PaddleOCR instance (lazy initialized cached singleton)
@@ -68,13 +66,13 @@ def get_ocr_instance():
     global _ocr_instance, OCR_INITIALIZED
     if _ocr_instance is None:
         try:
-            logger.info("Initializing PaddleOCR Singleton (using mobile models and disabling MKLDNN)...")
+            logger.info("Initializing PaddleOCR Singleton (using server models and enabling MKLDNN)...")
             from paddleocr import PaddleOCR
             _ocr_instance = PaddleOCR(
-                enable_mkldnn=False,
+                enable_mkldnn=True,
                 use_textline_orientation=True,
-                text_detection_model_name="PP-OCRv5_mobile_det",
-                text_recognition_model_name="en_PP-OCRv5_mobile_rec"
+                text_detection_model_name="PP-OCRv5_server_det",
+                text_recognition_model_name="en_PP-OCRv5_server_rec"
             )
             OCR_INITIALIZED = True
             logger.info("PaddleOCR Singleton successfully loaded!")
@@ -526,7 +524,7 @@ def is_tesseract_available() -> bool:
     return _TESSERACT_AVAILABLE
 
 
-def run_tesseract_fallback(pil_img) -> tuple:
+def run_tesseract_fallback(pil_img, extract_boxes=False) -> tuple:
     """
     Lightweight fallback OCR using Tesseract (pytesseract).
     Uses a temporary file inside a try-finally context manager to guarantee cleanup.
@@ -556,34 +554,35 @@ def run_tesseract_fallback(pil_img) -> tuple:
         confidences = []
         ocr_boxes = []
         try:
-            data = pytesseract.image_to_data(temp_path, lang=config_lang, config="--oem 1 --psm 6", output_type=pytesseract.Output.DICT)
-            if isinstance(data, dict) and 'text' in data:
-                n_boxes = len(data['text'])
-                for i in range(n_boxes):
-                    text = data['text'][i].strip()
-                    if not text:
-                        continue
-                    left = data['left'][i]
-                    top = data['top'][i]
-                    width = data['width'][i]
-                    height = data['height'][i]
-                    conf = float(data['conf'][i]) / 100.0 if 'conf' in data else 1.0
-                    
-                    if conf >= 0.0:
-                        confidences.append(conf)
-                    
-                    # Convert to standard 4-corner box: top-left, top-right, bottom-right, bottom-left
-                    box = [
-                        [left, top],
-                        [left + width, top],
-                        [left + width, top + height],
-                        [left, top + height]
-                    ]
-                    ocr_boxes.append({
-                        "box": box,
-                        "text": text,
-                        "confidence": conf
-                    })
+            if extract_boxes:
+                data = pytesseract.image_to_data(temp_path, lang=config_lang, config="--oem 1 --psm 6", output_type=pytesseract.Output.DICT)
+                if isinstance(data, dict) and 'text' in data:
+                    n_boxes = len(data['text'])
+                    for i in range(n_boxes):
+                        text = data['text'][i].strip()
+                        if not text:
+                            continue
+                        left = data['left'][i]
+                        top = data['top'][i]
+                        width = data['width'][i]
+                        height = data['height'][i]
+                        conf = float(data['conf'][i]) / 100.0 if 'conf' in data else 1.0
+                        
+                        if conf >= 0.0:
+                            confidences.append(conf)
+                        
+                        # Convert to standard 4-corner box: top-left, top-right, bottom-right, bottom-left
+                        box = [
+                            [left, top],
+                            [left + width, top],
+                            [left + width, top + height],
+                            [left, top + height]
+                        ]
+                        ocr_boxes.append({
+                            "box": box,
+                            "text": text,
+                            "confidence": conf
+                        })
         except Exception as e:
             logger.warning(f"Failed to extract Tesseract word boxes: {str(e)}")
         
@@ -729,7 +728,7 @@ def perform_ocr_page_stable(ocr_engine, page_doc, page_idx: int, total_pages: in
     if classification == "low-content":
         logger.info(f"Page {page_num}: Classified as low-content. Routing directly to Tesseract.")
         try:
-            lines, conf, ocr_boxes = run_tesseract_fallback(processed_img)
+            lines, conf, ocr_boxes = run_tesseract_fallback(processed_img, extract_boxes=False)
             engine_used = "Tesseract"
         except Exception as e:
             logger.error(f"Direct Tesseract run failed on page {page_num}: {str(e)}")
@@ -779,7 +778,7 @@ def perform_ocr_page_stable(ocr_engine, page_doc, page_idx: int, total_pages: in
         if not paddle_success:
             logger.info(f"Page {page_num}: Escalating to Tesseract fallback.")
             try:
-                lines, conf, ocr_boxes = run_tesseract_fallback(processed_img)
+                lines, conf, ocr_boxes = run_tesseract_fallback(processed_img, extract_boxes=False)
                 engine_used = "Tesseract"
             except Exception as tess_err:
                 logger.error(f"Tesseract fallback failed on page {page_num}: {str(tess_err)}")
@@ -1036,6 +1035,14 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
                     "total_page_time": 0.0
                 }
                 return idx, [], meta
+
+        if len(fitz_text_cache) != total_pages:
+            try:
+                import fitz
+                with fitz.open(file_path) as fitz_doc:
+                    fitz_text_cache = [page.get_text() for page in fitz_doc]
+            except Exception as e:
+                logger.warning(f"fitz re-extraction failed: {e}")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=OCR_MAX_PARALLEL_WORKERS) as executor:
             futures = [executor.submit(process_page, idx) for idx in range(total_pages)]
