@@ -156,30 +156,33 @@ document.addEventListener("DOMContentLoaded", () => {
     const styleEl = document.createElement("style");
     styleEl.innerHTML = `
         .suggested-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            margin-top: 4px;
-            background: rgba(245, 158, 11, 0.1);
-            color: #f59e0b;
-            border: 1px solid rgba(245, 158, 11, 0.25);
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 0.725rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            user-select: none;
-            width: fit-content;
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 6px !important;
+            margin-top: 6px !important;
+            background: #fef3c7 !important; /* warm amber background for high contrast */
+            color: #b45309 !important; /* dark amber text for readable AAA-level contrast */
+            border: 1px solid #fde68a !important;
+            padding: 5px 10px !important;
+            border-radius: 6px !important;
+            font-size: 0.75rem !important;
+            font-weight: 600 !important;
+            cursor: pointer !important;
+            transition: all 0.2s ease !important;
+            user-select: none !important;
+            width: fit-content !important;
+            box-shadow: 0 1px 2px rgba(180, 83, 9, 0.08) !important;
         }
         .suggested-badge:hover {
-            background: rgba(245, 158, 11, 0.2);
-            border-color: rgba(245, 158, 11, 0.4);
-            transform: translateY(-1px);
+            background: #fcd34d !important;
+            border-color: #fbbf24 !important;
+            color: #78350f !important;
+            transform: translateY(-1px) !important;
+            box-shadow: 0 2px 4px rgba(180, 83, 9, 0.15) !important;
         }
         .low-confidence-input {
-            border-color: rgba(245, 158, 11, 0.4) !important;
-            box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.15) !important;
+            border-color: #fbbf24 !important;
+            box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.15) !important;
         }
     `;
     document.head.appendChild(styleEl);
