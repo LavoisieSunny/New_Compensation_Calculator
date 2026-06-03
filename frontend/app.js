@@ -42,6 +42,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const statusText = document.getElementById("ocr-timer-status-text");
         const elapsedText = document.getElementById("ocr-timer-elapsed");
         
+        const headerTimerContainer = document.getElementById("header-ocr-timer-badge");
+        const headerElapsedText = document.getElementById("header-ocr-timer-elapsed");
+        
         if (timerContainer) {
             timerContainer.classList.remove("hidden-section");
             timerContainer.style.display = "flex";
@@ -56,11 +59,25 @@ document.addEventListener("DOMContentLoaded", () => {
             elapsedText.textContent = "00:00";
         }
         
+        if (headerTimerContainer) {
+            headerTimerContainer.classList.remove("hidden-section");
+            headerTimerContainer.style.display = "inline-flex";
+            headerTimerContainer.style.color = "var(--color-primary)";
+            headerTimerContainer.style.borderColor = "rgba(11, 58, 114, 0.25)";
+            headerTimerContainer.style.background = "rgba(11, 58, 114, 0.06)";
+        }
+        if (headerElapsedText) {
+            headerElapsedText.textContent = "00:00";
+        }
+        
         ocrTimerInterval = setInterval(() => {
             ocrSecondsElapsed++;
             const formattedTime = formatTimeMMSS(ocrSecondsElapsed);
             if (elapsedText) {
                 elapsedText.textContent = formattedTime;
+            }
+            if (headerElapsedText) {
+                headerElapsedText.textContent = formattedTime;
             }
             const loaderTimer = document.getElementById("ocr-loader-timer");
             if (loaderTimer) {
@@ -78,6 +95,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const statusText = document.getElementById("ocr-timer-status-text");
         const elapsedText = document.getElementById("ocr-timer-elapsed");
         
+        const headerTimerContainer = document.getElementById("header-ocr-timer-badge");
+        const headerElapsedText = document.getElementById("header-ocr-timer-elapsed");
+        
         if (statusIcon) {
             statusIcon.innerHTML = `<i class="fa-solid fa-circle-check" style="color: var(--color-success);"></i>`;
         }
@@ -86,6 +106,13 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (elapsedText) {
             elapsedText.textContent = `Total Time: ${formatTimeMMSS(ocrSecondsElapsed)}`;
+        }
+        
+        if (headerElapsedText && headerTimerContainer) {
+            headerElapsedText.textContent = `✅ Complete: ${formatTimeMMSS(ocrSecondsElapsed)}`;
+            headerTimerContainer.style.color = "var(--color-success)";
+            headerTimerContainer.style.borderColor = "rgba(22, 163, 74, 0.3)";
+            headerTimerContainer.style.background = "rgba(22, 163, 74, 0.08)";
         }
     }
 
@@ -98,6 +125,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const statusText = document.getElementById("ocr-timer-status-text");
         const elapsedText = document.getElementById("ocr-timer-elapsed");
         
+        const headerTimerContainer = document.getElementById("header-ocr-timer-badge");
+        const headerElapsedText = document.getElementById("header-ocr-timer-elapsed");
+        
         if (statusIcon) {
             statusIcon.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color: var(--color-danger);"></i>`;
         }
@@ -106,6 +136,13 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (elapsedText) {
             elapsedText.textContent = `OCR Failed after ${formatTimeMMSS(ocrSecondsElapsed)}`;
+        }
+        
+        if (headerElapsedText && headerTimerContainer) {
+            headerElapsedText.textContent = `❌ Failed: ${formatTimeMMSS(ocrSecondsElapsed)}`;
+            headerTimerContainer.style.color = "var(--color-danger)";
+            headerTimerContainer.style.borderColor = "rgba(220, 38, 38, 0.3)";
+            headerTimerContainer.style.background = "rgba(220, 38, 38, 0.08)";
         }
     }
 

@@ -70,10 +70,17 @@
             <header class="main-header">
                 <div class="header-title">
                     <h2 id="tab-title-text">Compensation Workstation</h2>
-                    <span class="header-badge" id="server-badge">
-                        <span class="pulse-indicator active"></span>
-                        <span id="server-status">Connecting Backend...</span>
-                    </span>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="header-badge" id="server-badge">
+                            <span class="pulse-indicator active"></span>
+                            <span id="server-status">Connecting Backend...</span>
+                        </span>
+                        <!-- Header OCR Timer Badge -->
+                        <span class="header-badge hidden-section" id="header-ocr-timer-badge" style="display: none; align-items: center; gap: 6px; font-family: monospace; font-weight: 700; color: var(--color-primary); background: rgba(11, 58, 114, 0.06); border: 1px solid rgba(11, 58, 114, 0.25);">
+                            <span>⏱</span>
+                            <span id="header-ocr-timer-elapsed">00:00</span>
+                        </span>
+                    </div>
                 </div>
             </header>
 
