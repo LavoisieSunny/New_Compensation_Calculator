@@ -238,6 +238,92 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // --- LLM CASE TYPE SUGGESTION ENGINE (Issue 2) ---
+    async function checkCaseType(selectedType, rawText) {
+        const container = document.getElementById("case-type-suggestion");
+        if (!container) return;
+        
+        if (!rawText || !rawText.trim()) {
+            container.innerHTML = "";
+            container.classList.add("hidden-section");
+            return;
+        }
+        
+        container.classList.remove("hidden-section");
+        container.innerHTML = `<div class="suggestion-loading">Analyzing case type...</div>`;
+        
+        try {
+            const response = await fetch("/api/ocr/suggest-case-type", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    raw_text: rawText,
+                    selected_case_type: selectedType
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error("Failed to fetch case type suggestions");
+            }
+            
+            const data = await response.json();
+            const suggestions = data.suggestions || [];
+            
+            if (suggestions.length === 0) {
+                container.innerHTML = "";
+                container.classList.add("hidden-section");
+                return;
+            }
+            
+            // First item is the top prediction (since it is sorted descending by the backend)
+            const topPrediction = suggestions[0];
+            const topCategory = topPrediction.case_type;
+            const topConfidence = topPrediction.confidence;
+            
+            const topIsDeath = (topCategory === "Death");
+            const selectedIsDeath = (selectedType === "death");
+            const isMismatch = (topConfidence > 0.50) && (topIsDeath !== selectedIsDeath);
+            
+            let warningHtml = "";
+            if (isMismatch) {
+                warningHtml = `
+                    <div class="case-warning">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        <span>⚠️ Document suggests ${topCategory} — please verify</span>
+                    </div>
+                `;
+            }
+            
+            let barsHtml = '<div class="case-type-bars">';
+            suggestions.forEach(item => {
+                const isDeathItem = (item.case_type === "Death");
+                const isSelectedCategory = (isDeathItem && selectedIsDeath) || (!isDeathItem && !selectedIsDeath);
+                const confidencePct = Math.round(item.confidence * 100);
+                const selectedClass = isSelectedCategory ? "selected" : "";
+                
+                barsHtml += `
+                    <div class="case-bar-row ${selectedClass}">
+                        <span class="case-label" title="${item.case_type}">${item.case_type}</span>
+                        <div class="bar-track">
+                            <div class="bar-fill" style="width: ${confidencePct}%"></div>
+                        </div>
+                        <span class="case-pct">${confidencePct}%</span>
+                    </div>
+                `;
+            });
+            barsHtml += '</div>';
+            
+            container.innerHTML = warningHtml + barsHtml;
+            
+        } catch (error) {
+            console.error("Error checking case type:", error);
+            container.innerHTML = "";
+            container.classList.add("hidden-section");
+        }
+    }
+
     // --- DOM REFERENCES ---
     const navItems = document.querySelectorAll(".nav-item");
     const viewports = document.querySelectorAll(".tab-viewport");
@@ -679,6 +765,16 @@ document.addEventListener("DOMContentLoaded", () => {
         populateFieldsForActiveCaseType();
         
         updateLiveCalculations();
+        
+        if (window.lastRawText) {
+            checkCaseType(caseType, window.lastRawText);
+        } else {
+            const container = document.getElementById("case-type-suggestion");
+            if (container) {
+                container.innerHTML = "";
+                container.classList.add("hidden-section");
+            }
+        }
     });
 
     // Trigger change event dynamically to handle browser auto-restored values on page refresh
@@ -998,6 +1094,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
                             // Store raw text for AI data recovery
                             currentOcrRawText = data.raw_text || [];
+                            window.lastRawText = currentOcrRawText.join("\n");
+                            checkCaseType(caseTypeSelect.value, window.lastRawText);
                             if (aiExtractBtn) {
                                 if (currentOcrRawText.length > 0) {
                                     aiExtractBtn.style.display = "inline-flex";
@@ -1242,6 +1340,9 @@ document.addEventListener("DOMContentLoaded", () => {
                         updateOcrInspector(matchedFile);
                         triggerTabNotification("ocr-quality");
                     }
+                    
+                    window.lastRawText = (matchedFile.raw_text || []).join("\n");
+                    checkCaseType(caseTypeSelect.value, window.lastRawText);
                     
                     switchTab("calculator");
                 }
@@ -2390,6 +2491,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.getElementById("reset-btn").addEventListener("click", () => {
         compensationForm.reset();
+        
+        window.lastRawText = "";
+        const suggestionDiv = document.getElementById("case-type-suggestion");
+        if (suggestionDiv) {
+            suggestionDiv.innerHTML = "";
+            suggestionDiv.classList.add("hidden-section");
+        }
         
         // Clear all live calculated dashboard elements back to hyphens
         ["live-calc-annual", "live-calc-future", "live-calc-deduct-pct", "live-calc-deduct-amt", "live-calc-multiplier", "live-calc-dependency", "live-calc-total"].forEach(id => {

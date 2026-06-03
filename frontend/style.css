@@ -2509,6 +2509,200 @@ select.low-confidence-input {
     border: 3px solid rgba(11, 58, 114, 0.1);
     border-top: 3px solid var(--color-primary);
     border-radius: 50%;
+.pane-tab-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+    transition: all var(--transition-fast);
+}
+
+.pane-tab-btn:hover {
+    color: var(--color-primary);
+    background: rgba(11, 58, 114, 0.04);
+    border-color: rgba(11, 58, 114, 0.1);
+}
+
+.pane-tab-btn.active {
+    background: rgba(11, 58, 114, 0.06) !important;
+    border: 1px solid rgba(11, 58, 114, 0.25) !important;
+    color: var(--color-primary) !important;
+    box-shadow: none !important;
+}
+
+/* Tab contents styling */
+.pane-tab-content {
+    display: none;
+    opacity: 0;
+    animation: tabFadeIn var(--transition-normal) forwards;
+}
+
+.pane-tab-content.active {
+    display: flex !important;
+}
+
+@keyframes tabFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Red / orange notification dot on tabs to avoid forced switching */
+.notification-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 6px;
+    height: 6px;
+    background-color: var(--color-warning);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--color-warning);
+    animation: pulseNotify 1.5s infinite;
+}
+
+.notification-dot.hidden {
+    display: none !important;
+}
+
+@keyframes pulseNotify {
+    0% { transform: scale(0.9); opacity: 0.8; }
+    50% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 10px var(--color-warning); }
+    100% { transform: scale(0.9); opacity: 0.8; }
+}
+
+/* Slide-over Widescreen drawer expander classes */
+.slideover-panel.expanded {
+    width: 800px !important;
+}
+
+.slideover-expand-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    padding: 4px;
+    border-radius: 4px;
+    transition: all var(--transition-fast);
+}
+
+.slideover-expand-btn:hover {
+    color: var(--color-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* Chat bubble zooming & hover effects */
+.chat-bubble .chat-text {
+    cursor: zoom-in;
+    transition: all var(--transition-fast);
+    position: relative;
+}
+
+.chat-bubble .chat-text:hover {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(0, 242, 254, 0.25) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.chat-bubble.bot .chat-text:hover {
+    box-shadow: 0 4px 15px rgba(0, 242, 254, 0.1);
+}
+
+/* Detailed Message modal override formatting */
+#chat-modal-body-content {
+    font-size: 1.05rem;
+    line-height: 1.6;
+    letter-spacing: 0.2px;
+}
+
+#chat-modal-body-content strong {
+    color: var(--color-primary);
+}
+
+#chat-modal-body-content em {
+    color: var(--color-accent);
+}
+
+#chat-modal-body-content ul {
+    margin-left: 24px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#chat-modal-body-content li {
+    color: var(--text-secondary);
+}
+
+#chat-modal-body-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 15px 0;
+    font-size: 0.95rem;
+    background: rgba(0,0,0,0.15);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+#chat-modal-body-content th, #chat-modal-body-content td {
+    padding: 10px 14px;
+    border: 1px solid var(--border-glass);
+    text-align: left;
+}
+
+#chat-modal-body-content th {
+    background: rgba(255,255,255,0.02);
+    color: var(--color-primary);
+    font-weight: 600;
+}
+
+/* Premium Glassmorphic OCR Loader Overlay */
+.form-ocr-loader {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    border-radius: var(--radius-lg);
+    animation: fadeIn var(--transition-normal) forwards;
+    text-align: center;
+    padding: 24px;
+    color: var(--text-primary);
+}
+
+.spinner-glow {
+    width: 50px;
+    height: 50px;
+    border: 3px solid rgba(11, 58, 114, 0.1);
+    border-top: 3px solid var(--color-primary);
+    border-radius: 50%;
     animation: spinOcr 1s linear infinite;
     margin-bottom: 16px;
     box-shadow: 0 0 15px rgba(11, 58, 114, 0.1);
@@ -2517,4 +2711,107 @@ select.low-confidence-input {
 @keyframes spinOcr {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+}
+
+/* ======================================================
+   Case Type Suggestion Panel & Confidence Bars (Issue 2)
+   ====================================================== */
+.case-type-suggestion-container {
+    margin-top: 10px;
+    padding: 14px 16px;
+    border-radius: var(--radius-sm);
+    background: rgba(15, 23, 42, 0.02);
+    border: 1px solid var(--border-glass);
+    transition: all var(--transition-fast) ease-in-out;
+}
+
+.suggestion-loading {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.suggestion-loading::before {
+    content: "";
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--text-secondary);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spinOcr 0.8s linear infinite;
+}
+
+.case-warning {
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    color: #f87171;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 0.78rem;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    animation: fadeIn var(--transition-fast) forwards;
+}
+
+.case-type-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.case-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    padding: 2px 0;
+}
+
+.case-bar-row.selected {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.case-label {
+    min-width: 180px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bar-track {
+    flex: 1;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+}
+
+.bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    width: 0;
+    transition: width 0.6s cubic-bezier(0.1, 0.8, 0.2, 1.0);
+}
+
+.case-bar-row.selected .bar-fill {
+    background: var(--color-primary);
+    box-shadow: 0 0 8px rgba(37, 99, 235, 0.4);
+}
+
+.case-bar-row:not(.selected) .bar-fill {
+    background: rgba(148, 163, 184, 0.3);
+}
+
+.case-pct {
+    min-width: 32px;
+    text-align: right;
+    font-family: monospace;
+    font-size: 0.75rem;
 }

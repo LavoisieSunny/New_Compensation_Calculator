@@ -1753,3 +1753,72 @@ async def ai_recover_fields(request: AIRecoverRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class SuggestCaseTypeRequest(BaseModel):
+    raw_text: str
+    selected_case_type: str
+
+@router.post("/suggest-case-type")
+async def suggest_case_type(request: SuggestCaseTypeRequest):
+    """
+    Suggests workers' compensation case type probabilities based on raw document text.
+    Uses the project's configured LLM provider and parses the JSON response.
+    """
+    raw_text = request.raw_text[:8000]  # Allow up to 8k characters for good context
+    selected = request.selected_case_type
+
+    CASE_TYPES = [
+        "Death", 
+        "Permanent Total Disability", 
+        "Permanent Partial Disability",
+        "Temporary Total Disability", 
+        "Medical Only", 
+        "Vocational Rehabilitation"
+    ]
+
+    system_prompt = (
+        "You are a legal document analyst for workers' compensation claims.\n"
+        "Given extracted text from a claim document, return ONLY a JSON array (no markdown, no explanation, no backticks) of case type probabilities.\n"
+        "Format: [{\"case_type\": \"Death\", \"confidence\": 0.82}, ...]\n"
+        "All confidences must sum to 1.0. Include all possible case types even if confidence is near 0."
+    )
+
+    user_prompt = (
+        f"Document text:\n{raw_text}\n\n"
+        f"The user selected: \"{selected}\"\n"
+        f"Analyze the document and return confidence scores for each case type:\n"
+        f"{', '.join(CASE_TYPES)}"
+    )
+
+    try:
+        from backend.llm_client import generate_response
+        response_text = await asyncio.to_thread(generate_response, user_prompt, system_prompt)
+        
+        # Extract JSON array block using regex
+        json_match = re.search(r"\[\s*\{.*\}\s*\]", response_text, re.DOTALL)
+        if json_match:
+            suggestions = json.loads(json_match.group(0))
+        else:
+            suggestions = json.loads(response_text)
+            
+        # Guarantee all CASE_TYPES are included
+        existing_types = {s.get("case_type") for s in suggestions if isinstance(s, dict)}
+        for ct in CASE_TYPES:
+            if ct not in existing_types:
+                suggestions.append({"case_type": ct, "confidence": 0.0})
+                
+        suggestions.sort(key=lambda x: x.get("confidence", 0.0), reverse=True)
+        return {"suggestions": suggestions, "selected": selected}
+        
+    except Exception as e:
+        logger.error(f"Failed to parse case type suggestions JSON: {str(e)}. Raw response: {response_text if 'response_text' in locals() else 'None'}")
+        fallback_suggestions = [{"case_type": ct, "confidence": 1.0 / len(CASE_TYPES)} for ct in CASE_TYPES]
+        # Soft-boost selected category or Death
+        for fs in fallback_suggestions:
+            if fs["case_type"].lower() == selected.lower():
+                fs["confidence"] = 0.5
+            else:
+                fs["confidence"] = 0.5 / (len(CASE_TYPES) - 1)
+        fallback_suggestions.sort(key=lambda x: x["confidence"], reverse=True)
+        return {"suggestions": fallback_suggestions, "selected": selected, "error": str(e)}
