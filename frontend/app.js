@@ -1290,79 +1290,38 @@ document.addEventListener("DOMContentLoaded", () => {
             "loss_estate": "loss-estate",
             "dependents": "dependents",
             "marital_status": "marital-status"
-        };
-
-        // Helper to populate a single DOM element based on key, inputId, and active status
+        };        // Helper to populate a single DOM element based on key, inputId, and active status
         function populateField(cacheKey, inputId, isAllowed) {
             const el = document.getElementById(inputId);
             if (!el) return;
 
             if (!isAllowed) {
-                // If not allowed for this mode, do NOT populate or show badges.
+                // If not allowed for this mode, do NOT populate.
                 return;
             }
 
             const val = lastExtractedFields[cacheKey];
-            const conf = lastExtractedConfidences[cacheKey] !== undefined ? lastExtractedConfidences[cacheKey] : 1.0;
 
             if (val === undefined || val === null || val === "") {
                 return;
             }
 
-            // Apply Confidence Gate Rules (Part 4)
-            if (conf >= 0.80) {
-                // Auto-fill
-                if (inputId === "date-of-birth" || inputId === "date-of-accident") {
-                    let htmlDate = val;
-                    if (val.includes("-")) {
-                        const parts = val.split("-");
-                        if (parts.length === 3 && parts[2].length === 4) {
-                            htmlDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
-                        }
-                    }
-                    el.value = htmlDate;
-                } else {
-                    el.value = val;
-                }
-                el.dispatchEvent(new Event("input"));
-                el.dispatchEvent(new Event("change"));
-            } else if (conf >= 0.60) {
-                // Suggest but do not auto-fill. Show amber badge.
-                const parent = el.closest(".form-group");
-                if (parent) {
-                    if (!parent.querySelector(`.suggested-badge[data-field="${cacheKey}"]`)) {
-                        const badge = document.createElement("div");
-                        badge.className = "suggested-badge ai-metadata-badge";
-                        badge.setAttribute("data-field", cacheKey);
-                        badge.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> Suggest: ${val} (${Math.round(conf * 100)}%)`;
-                        
-                        badge.addEventListener("click", () => {
-                            if (inputId === "date-of-birth" || inputId === "date-of-accident") {
-                                let htmlDate = val;
-                                if (val.includes("-")) {
-                                    const parts = val.split("-");
-                                    if (parts.length === 3 && parts[2].length === 4) {
-                                        htmlDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
-                                    }
-                                }
-                                el.value = htmlDate;
-                            } else {
-                                el.value = val;
-                            }
-                            el.dispatchEvent(new Event("input"));
-                            el.dispatchEvent(new Event("change"));
-                            badge.remove();
-                            showToast(`Applied suggested value ${val} to field!`, "success");
-                        });
-                        
-                        parent.appendChild(badge);
+            // Direct Auto-fill (no confidence gate / suggestion badge for other fields)
+            if (inputId === "date-of-birth" || inputId === "date-of-accident") {
+                let htmlDate = val;
+                if (val.includes("-")) {
+                    const parts = val.split("-");
+                    if (parts.length === 3 && parts[2].length === 4) {
+                        htmlDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
                     }
                 }
+                el.value = htmlDate;
             } else {
-                console.log(`[CONFIDENCE] Ignored field '${cacheKey}' due to low confidence (${conf.toFixed(2)})`);
+                el.value = val;
             }
+            el.dispatchEvent(new Event("input"));
+            el.dispatchEvent(new Event("change"));
         }
-
         // Run population for all common fields
         Object.keys(commonMapping).forEach(cacheKey => {
             populateField(cacheKey, commonMapping[cacheKey], true);
