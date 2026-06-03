@@ -54,9 +54,11 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (statusText) {
             statusText.textContent = "Processing PDF...";
+            statusText.style.color = "var(--text-primary)";
         }
         if (elapsedText) {
             elapsedText.textContent = "00:00";
+            elapsedText.style.color = "var(--color-primary)";
         }
         
         if (headerTimerContainer) {
@@ -103,9 +105,11 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (statusText) {
             statusText.textContent = "✅ OCR Complete";
+            statusText.style.color = "var(--color-success)";
         }
         if (elapsedText) {
             elapsedText.textContent = `Total Time: ${formatTimeMMSS(ocrSecondsElapsed)}`;
+            elapsedText.style.color = "var(--color-success)";
         }
         
         if (headerElapsedText && headerTimerContainer) {
@@ -133,9 +137,11 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (statusText) {
             statusText.textContent = "❌ OCR Failed";
+            statusText.style.color = "var(--color-danger)";
         }
         if (elapsedText) {
             elapsedText.textContent = `OCR Failed after ${formatTimeMMSS(ocrSecondsElapsed)}`;
+            elapsedText.style.color = "var(--color-danger)";
         }
         
         if (headerElapsedText && headerTimerContainer) {
@@ -2363,6 +2369,39 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Clear AI metadata badges
         document.querySelectorAll(".ai-metadata-badge").forEach(el => el.remove());
+
+        // Reset live OCR timers
+        if (ocrTimerInterval) {
+            clearInterval(ocrTimerInterval);
+            ocrTimerInterval = null;
+        }
+        ocrSecondsElapsed = 0;
+
+        const headerTimerContainer = document.getElementById("header-ocr-timer-badge");
+        const headerElapsedText = document.getElementById("header-ocr-timer-elapsed");
+        const statusIcon = document.getElementById("ocr-timer-status-icon");
+        const statusText = document.getElementById("ocr-timer-status-text");
+        const elapsedText = document.getElementById("ocr-timer-elapsed");
+
+        if (headerElapsedText) {
+            headerElapsedText.textContent = "Ready";
+        }
+        if (headerTimerContainer) {
+            headerTimerContainer.style.color = "var(--text-secondary)";
+            headerTimerContainer.style.borderColor = "var(--border-glass)";
+            headerTimerContainer.style.background = "rgba(15, 23, 42, 0.04)";
+        }
+        if (statusIcon) {
+            statusIcon.innerHTML = `<i class="fa-solid fa-clock" style="color: var(--color-primary);"></i>`;
+        }
+        if (statusText) {
+            statusText.textContent = "Ready for upload";
+            statusText.style.color = "var(--text-secondary)";
+        }
+        if (elapsedText) {
+            elapsedText.textContent = "Ready";
+            elapsedText.style.color = "var(--text-secondary)";
+        }
         
         sharedFields.classList.remove("show");
         sharedFields.classList.add("hidden-section");

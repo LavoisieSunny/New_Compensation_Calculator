@@ -69,16 +69,18 @@
             <!-- Global Header -->
             <header class="main-header">
                 <div class="header-title">
-                    <h2 id="tab-title-text">Compensation Workstation</h2>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <h2 id="tab-title-text" style="margin: 0;">Compensation Workstation</h2>
+                        <!-- Header OCR Timer Badge -->
+                        <span class="header-badge" id="header-ocr-timer-badge" style="display: inline-flex; align-items: center; gap: 6px; font-family: monospace; font-weight: 700; color: var(--text-secondary); background: rgba(15, 23, 42, 0.04); border: 1px solid var(--border-glass);">
+                            <span>⏱</span>
+                            <span id="header-ocr-timer-elapsed">Ready</span>
+                        </span>
+                    </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <span class="header-badge" id="server-badge">
                             <span class="pulse-indicator active"></span>
                             <span id="server-status">Connecting Backend...</span>
-                        </span>
-                        <!-- Header OCR Timer Badge -->
-                        <span class="header-badge hidden-section" id="header-ocr-timer-badge" style="display: none; align-items: center; gap: 6px; font-family: monospace; font-weight: 700; color: var(--color-primary); background: rgba(11, 58, 114, 0.06); border: 1px solid rgba(11, 58, 114, 0.25);">
-                            <span>⏱</span>
-                            <span id="header-ocr-timer-elapsed">00:00</span>
                         </span>
                     </div>
                 </div>
@@ -121,16 +123,15 @@
                                         <input type="file" id="single-file-input" accept="application/pdf" style="display: none;">
                                     </div>
                                 </div>
-                                
-                                <!-- Premium Live OCR Timer Container -->
-                                <div id="ocr-timer-container" class="ocr-timer-container hidden-section" style="margin-top: 12px; padding: 12px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-panel); display: none; align-items: center; justify-content: space-between; gap: 12px;">
+                                                                 <!-- Premium Live OCR Timer Container -->
+                                <div id="ocr-timer-container" class="ocr-timer-container" style="margin-top: 12px; padding: 12px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-panel); display: flex; align-items: center; justify-content: space-between; gap: 12px;">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span id="ocr-timer-status-icon" style="display: inline-flex; align-items: center; justify-content: center;"><i class="fa-solid fa-spinner fa-spin text-glow" style="color: var(--color-primary);"></i></span>
-                                        <span id="ocr-timer-status-text" style="font-weight: 500; font-size: 0.85rem; color: var(--text-primary);">Processing PDF...</span>
+                                        <span id="ocr-timer-status-icon" style="display: inline-flex; align-items: center; justify-content: center;"><i class="fa-solid fa-clock" style="color: var(--color-primary);"></i></span>
+                                        <span id="ocr-timer-status-text" style="font-weight: 500; font-size: 0.85rem; color: var(--text-secondary);">Ready for upload</span>
                                     </div>
-                                    <div style="display: flex; align-items: center; gap: 6px; font-family: monospace; font-size: 0.95rem; font-weight: 700; color: var(--color-primary);">
+                                    <div style="display: flex; align-items: center; gap: 6px; font-family: monospace; font-size: 0.95rem; font-weight: 700; color: var(--text-secondary);">
                                         <span id="ocr-timer-clock-icon">⏱</span>
-                                        <span id="ocr-timer-elapsed">00:00</span>
+                                        <span id="ocr-timer-elapsed">Ready</span>
                                     </div>
                                 </div>
                             </div>
