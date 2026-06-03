@@ -1,5 +1,6 @@
 import os
 import sys
+import asyncio
 import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,12 +35,17 @@ async def startup_event():
         
         # Initialize Qdrant Client and collection safety dynamically
         get_qdrant_client()
-
-        # Warm up PaddleOCR singleton model
-        from backend.ocr import get_ocr_instance
-        get_ocr_instance()
     except Exception as e:
         logger.error(f"Startup check failed: {str(e)}")
+
+    # Warm up PaddleOCR — isolated so failure never blocks Ollama/Qdrant
+    try:
+        logger.info("Warming up PaddleOCR singleton...")
+        from backend.ocr import get_ocr_instance
+        await asyncio.to_thread(get_ocr_instance)
+        logger.info("PaddleOCR warm-up complete.")
+    except Exception as e:
+        logger.error(f"PaddleOCR warm-up failed (non-fatal): {str(e)}")
 
 app.add_middleware(
     CORSMiddleware,
