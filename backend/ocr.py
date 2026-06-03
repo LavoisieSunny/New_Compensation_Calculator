@@ -66,13 +66,13 @@ def get_ocr_instance():
     global _ocr_instance, OCR_INITIALIZED
     if _ocr_instance is None:
         try:
-            logger.info("Initializing PaddleOCR Singleton (using server models and enabling MKLDNN)...")
+            logger.info("Initializing PaddleOCR Singleton...")
             from paddleocr import PaddleOCR
             _ocr_instance = PaddleOCR(
                 enable_mkldnn=True,
                 use_textline_orientation=True,
-                text_detection_model_name="PP-OCRv5_server_det",
-                text_recognition_model_name="en_PP-OCRv5_server_rec"
+                text_detection_model_name="PP-OCRv5_mobile_det",
+                text_recognition_model_name="en_PP-OCRv5_mobile_rec"
             )
             OCR_INITIALIZED = True
             logger.info("PaddleOCR Singleton successfully loaded!")
