@@ -942,64 +942,110 @@ document.addEventListener("DOMContentLoaded", () => {
                 throw new Error("OCR Processing failed");
             }
 
-            const data = await response.json();
-            
-            // Remove spinner — always remove after response received
-            loader.remove();
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let partialBuffer = "";
 
-            if (data.success) {
-                // Stop timer on success
-                stopOcrTimerSuccess();
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-                // Apply OCR suggestions automatically
-                applyAllOcrSuggestions(data.suggestions);
+                partialBuffer += decoder.decode(value, { stream: true });
+                const lines = partialBuffer.split("\n");
+                
+                // Keep the last item in the buffer as it might be incomplete
+                partialBuffer = lines.pop();
 
-                // Update OCR Inspector with authentic telemetry data
-                updateOcrInspector(data);
+                for (const line of lines) {
+                    const cleanLine = line.trim();
+                    if (!cleanLine.startsWith("data: ")) continue;
+                    
+                    const payload = cleanLine.slice(6);
+                    const data = JSON.parse(payload);
 
-                // Store raw text for AI data recovery
-                currentOcrRawText = data.raw_text || [];
-                if (aiExtractBtn) {
-                    if (currentOcrRawText.length > 0) {
-                        aiExtractBtn.style.display = "inline-flex";
-                    } else {
-                        aiExtractBtn.style.display = "none";
+                    // Update loader visual progress message and submessage
+                    if (loader) {
+                        const messageEl = loader.querySelector("p");
+                        const submessageEl = loader.querySelector("span");
+                        
+                        if (messageEl && data.message) {
+                            messageEl.textContent = data.message;
+                        }
+                        if (submessageEl && data.status) {
+                            submessageEl.textContent = `Phase: ${data.status} (${data.progress}%)`;
+                        }
+                    }
+
+                    // Update local form panel timer status text
+                    const statusText = document.getElementById("ocr-timer-status-text");
+                    if (statusText && data.message) {
+                        statusText.textContent = data.message;
+                    }
+
+                    if (data.status === "done") {
+                        // Remove spinner after processing is fully complete
+                        loader.remove();
+
+                        if (data.success) {
+                            // Stop timer on success
+                            stopOcrTimerSuccess();
+
+                            // Apply OCR suggestions automatically
+                            applyAllOcrSuggestions(data.suggestions);
+
+                            // Update OCR Inspector with authentic telemetry data
+                            updateOcrInspector(data);
+
+                            // Store raw text for AI data recovery
+                            currentOcrRawText = data.raw_text || [];
+                            if (aiExtractBtn) {
+                                if (currentOcrRawText.length > 0) {
+                                    aiExtractBtn.style.display = "inline-flex";
+                                } else {
+                                    aiExtractBtn.style.display = "none";
+                                }
+                            }
+
+                            // Load high-fidelity PDF preview in the right pane!
+                            const blobUrl = URL.createObjectURL(file);
+                            singlePreviewFilename.innerHTML = `${file.name} <span class="badge source-badge" style="margin-left: 8px; background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; display: inline-block;">Source: ${data.fallback_source}</span>`;
+                            singlePreviewContainer.innerHTML = `
+                                <iframe class="pdf-iframe" src="${blobUrl}#toolbar=0" width="100%" height="100%"></iframe>
+                            `;
+                            singlePreviewCard.classList.remove("hidden-section");
+                            singlePreviewCard.classList.add("show");
+
+                            // Programmatically switch active right pane tab to PDF Preview upon successful upload
+                            const pdfTabBtn = document.querySelector('.pane-tab-btn[data-pane-tab="pdf"]');
+                            if (pdfTabBtn) {
+                                pdfTabBtn.click();
+                            }
+
+                            // Programmatically open the AI Assistant slide-over chatbot drawer upon successful upload
+                            if (aiAssistantTrigger && slideover && !slideover.classList.contains("open")) {
+                                aiAssistantTrigger.click();
+                            }
+
+                            // Highlight and show the live metrics and precedents cards
+                            if (liveMetricsCard) liveMetricsCard.classList.add("show");
+                            if (evaluatorCard) evaluatorCard.classList.add("show");
+
+                            if (typeof triggerTabNotification === "function") {
+                                triggerTabNotification("analysis");
+                                triggerTabNotification("ocr-quality");
+                            }
+
+                            showToast("Case PDF analyzed! Form auto-filled focusing on Previous Judgment, Petition, and Prayer details. Please manually review fields.", "success");
+                        } else {
+                            stopOcrTimerFailure();
+                            showToast("Failed to extract data from the PDF: " + (data.message || "Unknown OCR error."), "error");
+                        }
+                    } else if (data.status === "failed") {
+                        loader.remove();
+                        stopOcrTimerFailure();
+                        showToast("Failed to extract data from the PDF: " + (data.message || "Unknown OCR error."), "error");
                     }
                 }
-
-                // Load high-fidelity PDF preview in the right pane!
-                const blobUrl = URL.createObjectURL(file);
-                singlePreviewFilename.innerHTML = `${file.name} <span class="badge source-badge" style="margin-left: 8px; background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; display: inline-block;">Source: ${data.fallback_source}</span>`;
-                singlePreviewContainer.innerHTML = `
-                    <iframe class="pdf-iframe" src="${blobUrl}#toolbar=0" width="100%" height="100%"></iframe>
-                `;
-                singlePreviewCard.classList.remove("hidden-section");
-                singlePreviewCard.classList.add("show");
-
-                // Programmatically switch active right pane tab to PDF Preview upon successful upload
-                const pdfTabBtn = document.querySelector('.pane-tab-btn[data-pane-tab="pdf"]');
-                if (pdfTabBtn) {
-                    pdfTabBtn.click();
-                }
-
-                // Programmatically open the AI Assistant slide-over chatbot drawer upon successful upload
-                if (aiAssistantTrigger && slideover && !slideover.classList.contains("open")) {
-                    aiAssistantTrigger.click();
-                }
-
-                // Highlight and show the live metrics and precedents cards
-                if (liveMetricsCard) liveMetricsCard.classList.add("show");
-                if (evaluatorCard) evaluatorCard.classList.add("show");
-
-                if (typeof triggerTabNotification === "function") {
-                    triggerTabNotification("analysis");
-                    triggerTabNotification("ocr-quality");
-                }
-
-                showToast("Case PDF analyzed! Form auto-filled focusing on Previous Judgment, Petition, and Prayer details. Please manually review fields.", "success");
-            } else {
-                stopOcrTimerFailure();
-                showToast("Failed to extract data from the PDF: " + (data.message || "Unknown OCR error."), "error");
             }
         } catch (error) {
             loader.remove();

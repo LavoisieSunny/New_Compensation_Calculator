@@ -10,7 +10,10 @@ import threading
 import psutil
 import numpy as np
 from PIL import Image
+import asyncio
+import json
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pypdf import PdfReader
 import pypdfium2 as pdfium
 
@@ -1475,7 +1478,7 @@ def run_background_pdf_indexing(file_id: str, temp_path: str, filename: str):
 
 @router.post("/process-ocr")
 async def process_single_file(file: UploadFile = File(...)):
-    """Synchronous single file handler implementing identical frontend contracts."""
+    """Synchronous single file handler implementing identical frontend contracts, refactored to stream SSE updates."""
     file_ext = os.path.splitext(file.filename)[1].lower()
     allowed_images = {".png", ".jpg", ".jpeg", ".bmp"}
     allowed_docs = {".pdf"}
@@ -1486,81 +1489,128 @@ async def process_single_file(file: UploadFile = File(...)):
             detail="Only PNG, JPG, BMP and PDF formats are supported."
         )
 
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
-            shutil.copyfileobj(file.file, tmp)
-            temp_path = tmp.name
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Saving upload failed: {str(e)}")
+    async def event_generator():
+        temp_path = None
+        try:
+            # Phase 1: Saving upload
+            yield f"data: {json.dumps({'status': 'saving', 'progress': 5, 'message': 'Saving upload to temp file...'})}\n\n"
+            await asyncio.sleep(0.01)
 
-    try:
-        start_time = time.time()
-        fallback_source = "DigitalPDF"
-        ocr_debug = _build_ocr_debug("DigitalPDF", 0, 1.0, [], [], [], "", 0.0, total_ocr_time=time.time() - start_time)
+            def save_to_temp():
+                with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
+                    shutil.copyfileobj(file.file, tmp)
+                    return tmp.name
+            
+            temp_path = await asyncio.to_thread(save_to_temp)
 
-        if file_ext == ".pdf":
-            # 1. Digitalselectable check
-            text_lines = extract_digital_pdf_text(temp_path)
+            start_time = time.time()
+            fallback_source = "DigitalPDF"
+            ocr_debug = _build_ocr_debug("DigitalPDF", 0, 1.0, [], [], [], "", 0.0, total_ocr_time=0.0)
 
-            # 2. OCR retry escalation
-            if is_extracted_text_sparse(text_lines):
-                text_lines, ocr_debug = perform_ocr_on_scanned_pdf(temp_path, original_filename=file.filename)
+            if file_ext == ".pdf":
+                # Phase 2: Extracting digital PDF text
+                yield f"data: {json.dumps({'status': 'extracting', 'progress': 15, 'message': 'Extracting digital PDF text...'})}\n\n"
+                await asyncio.sleep(0.01)
+                
+                text_lines = await asyncio.to_thread(extract_digital_pdf_text, temp_path)
+
+                # Phase 3: Checking text quality
+                yield f"data: {json.dumps({'status': 'checking', 'progress': 35, 'message': 'Checking text quality...'})}\n\n"
+                await asyncio.sleep(0.01)
+
+                if is_extracted_text_sparse(text_lines):
+                    # Escalating to Scanned PDF OCR
+                    yield f"data: {json.dumps({'status': 'ocr', 'progress': 50, 'message': 'Scanned PDF detected — running PaddleOCR...'})}\n\n"
+                    await asyncio.sleep(0.01)
+                    
+                    text_lines, ocr_debug = await asyncio.to_thread(
+                        perform_ocr_on_scanned_pdf, temp_path, original_filename=file.filename
+                    )
+                    fallback_source = "PaddleOCR"
+
+                if is_extracted_text_sparse(text_lines):
+                    # Escalating to Alternate layouts
+                    yield f"data: {json.dumps({'status': 'checking_alternate', 'progress': 65, 'message': 'Sparse text — running PyMuPDF/pdfplumber fallback...'})}\n\n"
+                    await asyncio.sleep(0.01)
+                    
+                    alt_lines = await asyncio.to_thread(extract_alternate_pdf_text, temp_path)
+                    if len(alt_lines) > len(text_lines):
+                        text_lines = alt_lines
+                        fallback_source = "AlternateOCR"
+                        ocr_debug["fallback_ocr_engine"] = "PyMuPDF/pdfplumber"
+                        ocr_debug["ocr_quality_score"] = 1.0
+                        ocr_debug["total_ocr_time"] = round(time.time() - start_time, 2)
+            else:
+                # Running Image OCR
+                yield f"data: {json.dumps({'status': 'ocr', 'progress': 40, 'message': 'Running PaddleOCR on image...'})}\n\n"
+                await asyncio.sleep(0.01)
+                
+                text_lines, ocr_debug = await asyncio.to_thread(perform_ocr_on_image, temp_path)
                 fallback_source = "PaddleOCR"
 
-            # 3. Alternate Layout fallback
-            if is_extracted_text_sparse(text_lines):
-                alt_lines = extract_alternate_pdf_text(temp_path)
-                if len(alt_lines) > len(text_lines):
-                    text_lines = alt_lines
-                    fallback_source = "AlternateOCR"
-                    ocr_debug["fallback_ocr_engine"] = "PyMuPDF/pdfplumber"
-                    ocr_debug["ocr_quality_score"] = 1.0
-                    ocr_debug["total_ocr_time"] = round(time.time() - start_time, 2)
-        else:
-            text_lines, ocr_debug = perform_ocr_on_image(temp_path)
-            fallback_source = "PaddleOCR"
+            # Phase 4: Parsing legal fields
+            yield f"data: {json.dumps({'status': 'parsing', 'progress': 75, 'message': 'Parsing legal fields...'})}\n\n"
+            await asyncio.sleep(0.01)
 
-        suggestions = parse_extracted_text(text_lines)
-        suggestions = apply_ocr_quality_gate(suggestions, ocr_debug)
+            suggestions = await asyncio.to_thread(parse_extracted_text, text_lines)
+            suggestions = apply_ocr_quality_gate(suggestions, ocr_debug)
 
-        if suggestions.get("ai_recovery_triggered", False):
-            fallback_source = "RealTextRecovery"
-        suggestions["fallback_source_used"] = fallback_source
+            if suggestions.get("ai_recovery_triggered", False):
+                fallback_source = "RealTextRecovery"
+            suggestions["fallback_source_used"] = fallback_source
 
-        award_amount = extract_award_amount_from_text(text_lines)
-        if award_amount > 0:
-            suggestions["award_amount"] = award_amount
-            suggestions["total_compensation"] = award_amount
-            
-            from backend.parser_heuristics import deduce_notional_income
-            age = suggestions.get("age") or 30
-            marital_status = suggestions.get("marital_status") or "married"
-            dependents = suggestions.get("dependents") or ""
-            future_prospect = suggestions.get("future_prospect") or 25.0
-            multiplier = suggestions.get("multiplier") or 15
-            
-            suggestions["monthly_income"] = deduce_notional_income(
-                award_amount, age, marital_status, dependents, future_prospect, multiplier
-            )
+            award_amount = extract_award_amount_from_text(text_lines)
+            if award_amount > 0:
+                suggestions["award_amount"] = award_amount
+                suggestions["total_compensation"] = award_amount
+                
+                from backend.parser_heuristics import deduce_notional_income
+                age = suggestions.get("age") or 30
+                marital_status = suggestions.get("marital_status") or "married"
+                dependents = suggestions.get("dependents") or ""
+                future_prospect = suggestions.get("future_prospect") or 25.0
+                multiplier = suggestions.get("multiplier") or 15
+                
+                suggestions["monthly_income"] = deduce_notional_income(
+                    award_amount, age, marital_status, dependents, future_prospect, multiplier
+                )
 
-        from backend.parser_heuristics import format_suggestions_for_calculator
-        formatted_suggestions = format_suggestions_for_calculator(suggestions)
+            from backend.parser_heuristics import format_suggestions_for_calculator
+            formatted_suggestions = format_suggestions_for_calculator(suggestions)
 
-        os.unlink(temp_path)
-        return {
-            "success": True,
-            "filename": file.filename,
-            "ocr_status": "loaded",
-            "fallback_source": fallback_source,
-            "suggestions": formatted_suggestions,
-            "raw_text": text_lines,
-            "ocr_debug": ocr_debug,
-        }
+            # Clean up temp file
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
+                temp_path = None
 
-    except Exception as e:
-        if os.path.exists(temp_path):
-            os.unlink(temp_path)
-        raise HTTPException(status_code=500, detail=str(e))
+            # Yield done message
+            done_payload = {
+                "status": "done",
+                "progress": 100,
+                "success": True,
+                "filename": file.filename,
+                "ocr_status": "loaded",
+                "fallback_source": fallback_source,
+                "suggestions": formatted_suggestions,
+                "raw_text": text_lines,
+                "ocr_debug": ocr_debug
+            }
+            yield f"data: {json.dumps(done_payload)}\n\n"
+
+        except Exception as e:
+            logger.error(f"Streaming OCR error: {str(e)}")
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
+            yield f"data: {json.dumps({'status': 'failed', 'progress': 100, 'success': False, 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 
 @router.post("/upload-batch")
