@@ -870,15 +870,17 @@ document.addEventListener("DOMContentLoaded", () => {
         }, false);
     });
 
-    ["dragleave", "drop"].forEach(eventName => {
-        singleDropZone.addEventListener(eventName, (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            singleDropZone.classList.remove("dragover");
-        }, false);
-    });
+    singleDropZone.addEventListener("dragleave", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        singleDropZone.classList.remove("dragover");
+    }, false);
 
     singleDropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        singleDropZone.classList.remove("dragover");
+        
         const dt = e.dataTransfer;
         const files = dt.files;
         if (files.length > 0) {
@@ -886,8 +888,13 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    singleDropZone.addEventListener("click", () => {
+    singleDropZone.addEventListener("click", (e) => {
+        if (e.target === singleFileInput) return;
         singleFileInput.click();
+    });
+
+    singleFileInput.addEventListener("click", (e) => {
+        e.stopPropagation();
     });
 
     singleFileInput.addEventListener("change", (e) => {
@@ -1015,15 +1022,17 @@ document.addEventListener("DOMContentLoaded", () => {
         }, false);
     });
 
-    ["dragleave", "drop"].forEach(eventName => {
-        dropZone.addEventListener(eventName, (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            dropZone.classList.remove("dragover");
-        }, false);
-    });
+    dropZone.addEventListener("dragleave", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove("dragover");
+    }, false);
 
     dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove("dragover");
+        
         const dt = e.dataTransfer;
         const files = dt.files;
         if (files.length > 0) {
@@ -1031,8 +1040,13 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    dropZone.addEventListener("click", () => {
+    dropZone.addEventListener("click", (e) => {
+        if (e.target === fileInput) return;
         fileInput.click();
+    });
+
+    fileInput.addEventListener("click", (e) => {
+        e.stopPropagation();
     });
 
     fileInput.addEventListener("change", (e) => {
@@ -1043,6 +1057,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Upload batch files
     async function handleBatchUpload(files) {
+        // Start the Live OCR timer for batch processing
+        startOcrTimer();
         const formData = new FormData();
         let validPdfCount = 0;
 
@@ -1170,6 +1186,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 const id = btn.getAttribute("data-id");
                 const matchedFile = fileQueue.find(f => f.file_id === id);
                 if (matchedFile && matchedFile.suggestions) {
+                    // Stop timer and set to complete if it was ticking
+                    stopOcrTimerSuccess();
+                    
                     applyAllOcrSuggestions(matchedFile.suggestions);
                     
                     // Update OCR Inspector tab with telemetry from the batch loaded file
@@ -1221,6 +1240,7 @@ document.addEventListener("DOMContentLoaded", () => {
             // Only poll if we have queued/active files
             const activeFiles = fileQueue.filter(f => f.status === "queued" || f.status === "scanning" || f.status === "indexing");
             if (activeFiles.length === 0) {
+                stopOcrTimerSuccess();
                 clearInterval(pollInterval);
                 isPolling = false;
                 return;
