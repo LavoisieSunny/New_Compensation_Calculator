@@ -464,12 +464,12 @@ def semantic_search(query: str, limit: int = 5, case_type_filter: str = None, fi
             search_filter = Filter(must=must_conditions)
             
         # Execute vector search
-        search_results = client.search(
+        search_results = client.query_points(
             collection_name=COLLECTION_NAME,
-            query_vector=query_vector,
+            query=query_vector,
             query_filter=search_filter,
             limit=limit
-        )
+        ).points
         
         # Format results
         formatted_results = []
