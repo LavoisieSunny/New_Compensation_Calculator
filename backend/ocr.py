@@ -467,7 +467,8 @@ def _build_ocr_debug(
     text_density_score: float,
     average_page_confidence: float = 0.0,
     raw_ocr_preview: str = "",
-    pages: list = None
+    pages: list = None,
+    total_ocr_time: float = 0.0
 ) -> dict:
     """Constructs the standard OCR debug metadata block."""
     return {
@@ -481,7 +482,8 @@ def _build_ocr_debug(
         "text_density_score": round(text_density_score, 3),
         "average_page_confidence": round(average_page_confidence, 3),
         "raw_ocr_preview": raw_ocr_preview,
-        "pages": pages or []
+        "pages": pages or [],
+        "total_ocr_time": round(total_ocr_time, 2)
     }
 
 
@@ -969,6 +971,7 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
     Sequentially renders and processes pages of a scanned PDF.
     Processes pages in chunks of 10 to avoid excessive memory usage.
     """
+    start_time = time.time()
     ocr_engine = get_ocr_instance()
 
     if ocr_engine is None:
@@ -976,7 +979,8 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
         return [], _build_ocr_debug(
             engine_used="unavailable", retry_count=0, quality_score=0.0,
             failed_pages=[], successful_pages=[], preprocessing_applied=[],
-            fallback_ocr_engine="none", text_density_score=0.0
+            fallback_ocr_engine="none", text_density_score=0.0,
+            total_ocr_time=time.time() - start_time
         )
 
     try:
@@ -1095,6 +1099,7 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
             sum(len(l) for l in real_lines) / max(len(real_lines), 1) / 80.0, 3
         ) if real_lines else 0.0
 
+        elapsed_time = time.time() - start_time
         ocr_debug = _build_ocr_debug(
             engine_used="PaddleOCR",
             retry_count=total_retry_count,
@@ -1106,7 +1111,8 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
             text_density_score=min(text_density, 1.0),
             average_page_confidence=overall_conf,
             raw_ocr_preview="\n".join(text_lines)[:3000],
-            pages=page_details
+            pages=page_details,
+            total_ocr_time=elapsed_time
         )
 
         # Generate searchable PDF asynchronously in the background to not block main execution
@@ -1151,15 +1157,18 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
 
     except Exception as e:
         logger.error(f"Critical error during scanned PDF OCR: {str(e)}")
+        elapsed_time = time.time() - start_time if 'start_time' in locals() else 0.0
         return [], _build_ocr_debug(
             engine_used="PaddleOCR", retry_count=0, quality_score=0.0,
             failed_pages=[], successful_pages=[], preprocessing_applied=[],
-            fallback_ocr_engine="none", text_density_score=0.0
+            fallback_ocr_engine="none", text_density_score=0.0,
+            total_ocr_time=elapsed_time
         )
 
 
 def perform_ocr_on_image(file_path: str) -> tuple:
     """Runs the stable single-page OCR pipeline directly on uploaded image (PNG, JPG, BMP)."""
+    start_time = time.time()
     ocr_engine = get_ocr_instance()
 
     if ocr_engine is None:
@@ -1167,7 +1176,8 @@ def perform_ocr_on_image(file_path: str) -> tuple:
         return [], _build_ocr_debug(
             engine_used="unavailable", retry_count=0, quality_score=0.0,
             failed_pages=[1], successful_pages=[], preprocessing_applied=[],
-            fallback_ocr_engine="none", text_density_score=0.0
+            fallback_ocr_engine="none", text_density_score=0.0,
+            total_ocr_time=time.time() - start_time
         )
 
     try:
@@ -1245,6 +1255,7 @@ def perform_ocr_on_image(file_path: str) -> tuple:
             "ocr_boxes": ocr_boxes
         }]
 
+        elapsed_time = time.time() - start_time
         ocr_debug = _build_ocr_debug(
             engine_used="PaddleOCR",
             retry_count=1 if engine_used == "Tesseract" else 0,
@@ -1256,15 +1267,18 @@ def perform_ocr_on_image(file_path: str) -> tuple:
             text_density_score=min(len(lines) / 30.0, 1.0),
             average_page_confidence=conf,
             raw_ocr_preview="\n".join(lines)[:3000],
-            pages=page_details
+            pages=page_details,
+            total_ocr_time=elapsed_time
         )
 
         return lines, ocr_debug
 
     except Exception as e:
         logger.error(f"Error running OCR on image: {str(e)}")
+        elapsed_time = time.time() - start_time if 'start_time' in locals() else 0.0
         return [], _build_ocr_debug(
-            "PaddleOCR", 0, 0.0, [1], [], [], "none", 0.0
+            "PaddleOCR", 0, 0.0, [1], [], [], "none", 0.0,
+            total_ocr_time=elapsed_time
         )
 
 
@@ -1369,6 +1383,7 @@ def apply_ocr_quality_gate(suggestions: dict, ocr_debug: dict) -> dict:
 
 def run_background_pdf_indexing(file_id: str, temp_path: str, filename: str):
     """Background worker indexing PDFs sequentially into Qdrant."""
+    start_time = time.time()
     try:
         BATCH_QUEUE[file_id]["status"] = "scanning"
         BATCH_QUEUE[file_id]["progress"] = 20
@@ -1376,7 +1391,7 @@ def run_background_pdf_indexing(file_id: str, temp_path: str, filename: str):
         # 1. Selectable text extraction
         text_lines = extract_digital_pdf_text(temp_path)
         fallback_source = "DigitalPDF"
-        ocr_debug = _build_ocr_debug("DigitalPDF", 0, 1.0, [], [], [], "", 0.0)
+        ocr_debug = _build_ocr_debug("DigitalPDF", 0, 1.0, [], [], [], "", 0.0, total_ocr_time=time.time() - start_time)
 
         # 2. Scanned OCR Escalation (scan_all_pages=True for comprehensive index)
         if is_extracted_text_sparse(text_lines):
@@ -1398,6 +1413,7 @@ def run_background_pdf_indexing(file_id: str, temp_path: str, filename: str):
                 fallback_source = "AlternateOCR"
                 ocr_debug["fallback_ocr_engine"] = "PyMuPDF/pdfplumber"
                 ocr_debug["ocr_quality_score"] = 1.0
+                ocr_debug["total_ocr_time"] = round(time.time() - start_time, 2)
 
         BATCH_QUEUE[file_id]["progress"] = 90
 
@@ -1478,8 +1494,9 @@ async def process_single_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Saving upload failed: {str(e)}")
 
     try:
+        start_time = time.time()
         fallback_source = "DigitalPDF"
-        ocr_debug = _build_ocr_debug("DigitalPDF", 0, 1.0, [], [], [], "", 0.0)
+        ocr_debug = _build_ocr_debug("DigitalPDF", 0, 1.0, [], [], [], "", 0.0, total_ocr_time=time.time() - start_time)
 
         if file_ext == ".pdf":
             # 1. Digitalselectable check
@@ -1498,6 +1515,7 @@ async def process_single_file(file: UploadFile = File(...)):
                     fallback_source = "AlternateOCR"
                     ocr_debug["fallback_ocr_engine"] = "PyMuPDF/pdfplumber"
                     ocr_debug["ocr_quality_score"] = 1.0
+                    ocr_debug["total_ocr_time"] = round(time.time() - start_time, 2)
         else:
             text_lines, ocr_debug = perform_ocr_on_image(temp_path)
             fallback_source = "PaddleOCR"
@@ -1610,6 +1628,16 @@ async def get_batch_status():
         }
         ocr_debug = item.get("ocr_debug")
         if ocr_debug:
+            sanitized_pages = []
+            for p in ocr_debug.get("pages", []):
+                sanitized_pages.append({
+                    "page": p.get("page"),
+                    "engine": p.get("engine"),
+                    "dpi": p.get("dpi"),
+                    "total_page_time": p.get("total_page_time"),
+                    "confidence": p.get("confidence"),
+                    "quality_score": p.get("quality_score"),
+                })
             sanitized_ocr_debug = {
                 "ocr_engine_used": ocr_debug.get("ocr_engine_used"),
                 "ocr_retry_count": ocr_debug.get("ocr_retry_count"),
@@ -1619,6 +1647,8 @@ async def get_batch_status():
                 "text_density_score": ocr_debug.get("text_density_score"),
                 "average_page_confidence": ocr_debug.get("average_page_confidence"),
                 "searchable_pdf_url": ocr_debug.get("searchable_pdf_url"),
+                "total_ocr_time": ocr_debug.get("total_ocr_time"),
+                "pages": sanitized_pages
             }
             sanitized_item["ocr_debug"] = sanitized_ocr_debug
         sanitized_queue.append(sanitized_item)

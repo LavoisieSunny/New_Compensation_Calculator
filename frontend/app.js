@@ -1211,7 +1211,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // Clear all previous low-confidence warning labels, styles, and AI metadata badges again to refresh
         document.querySelectorAll(".verification-warning").forEach(el => el.remove());
         document.querySelectorAll(".low-confidence-input").forEach(el => el.classList.remove("low-confidence-input"));
-        document.querySelectorAll(".ai-metadata-badge").forEach(el => el.remove());
+        document.querySelectorAll(".ai-metadata-badge:not([data-field='case_type'])").forEach(el => el.remove());
 
         // Field definitions and mapping to DOM input IDs
         // Always Populate (Part 6)
