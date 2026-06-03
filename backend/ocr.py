@@ -969,10 +969,6 @@ def generate_searchable_pdf(file_path: str, page_details: list, original_filenam
 # ======================================================
 
 def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_pages: bool = False, original_filename: str = None) -> tuple:
-    """
-    Sequentially renders and processes pages of a scanned PDF.
-    Processes pages in chunks of 10 to avoid excessive memory usage.
-    """
     start_time = time.time()
     ocr_engine = get_ocr_instance()
 
@@ -986,57 +982,23 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
         )
 
     try:
-        # Pre-cache digital selectable text using PyMuPDF (fitz) opened only once!
+        # Pre-cache fitz text
         fitz_text_cache = []
         try:
             import fitz
             with fitz.open(file_path) as fitz_doc:
-                for page in fitz_doc:
-                    fitz_text_cache.append(page.get_text())
+                fitz_text_cache = [page.get_text() for page in fitz_doc]
         except Exception as e:
             logger.warning(f"Failed to pre-extract digital text with PyMuPDF: {e}")
 
-        # Get total pages by opening and closing doc quickly
-        temp_doc = pdfium.PdfDocument(file_path)
-        total_pages = len(temp_doc)
-        temp_doc.close()
-        del temp_doc
+        # Get total pages
+        with pdfium.PdfDocument(file_path) as temp_doc:
+            total_pages = len(temp_doc)
         gc.collect()
 
-        logger.info(f"Scanned PDF '{file_path}' ({total_pages} pages): starting parallel mobile OCR pipeline (workers={OCR_MAX_PARALLEL_WORKERS})...")
-
-        page_results = {} # page_idx -> (lines, page_meta)
-        total_ocr_duration = 0.0
-
-        import concurrent.futures
-
-        def process_page(idx):
-            try:
-                # perform_ocr_page_stable manages rendering (independent doc opening), classifier, preprocessing, PaddleOCR, and fallback
-                lines, page_meta = perform_ocr_page_stable(
-                    ocr_engine, None, idx, total_pages, pdf_path=file_path, dpi=OCR_RENDER_DPI, fitz_text_cache=fitz_text_cache
-                )
-                return idx, lines, page_meta
-            except Exception as ex:
-                logger.error(f"Error during parallel OCR on page {idx+1}: {ex}")
-                page_num = idx + 1
-                meta = {
-                    "page": page_num,
-                    "engine": "Error",
-                    "dpi": OCR_RENDER_DPI,
-                    "confidence": 0.0,
-                    "text_length": 0,
-                    "quality_score": 0.0,
-                    "preprocessing_applied": [],
-                    "lines": 0,
-                    "ocr_boxes": [],
-                    "render_time": 0.0,
-                    "ocr_time": 0.0,
-                    "total_page_time": 0.0
-                }
-                return idx, [], meta
-
+        # Validate fitz cache length
         if len(fitz_text_cache) != total_pages:
+            logger.warning(f"fitz_text_cache length {len(fitz_text_cache)} != total_pages {total_pages}. Re-extracting...")
             try:
                 import fitz
                 with fitz.open(file_path) as fitz_doc:
@@ -1044,24 +1006,260 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
             except Exception as e:
                 logger.warning(f"fitz re-extraction failed: {e}")
 
+        logger.info(f"Scanned PDF '{file_path}' ({total_pages} pages): pre-rendering pages sequentially to temp images...")
+
+        # ============================================================
+        # CRITICAL FIX: Pre-render ALL pages to temp PNG files
+        # sequentially using a SINGLE open pdfium doc.
+        # This prevents concurrent pdfium doc opens that cause
+        # "Data format error" on large PDFs (>80 pages).
+        # ============================================================
+        render_dir = tempfile.mkdtemp(prefix="ocr_render_")
+        rendered_image_paths = {}  # page_idx -> temp png path
+
+        try:
+            scale = OCR_RENDER_DPI / 72.0
+            with pdfium.PdfDocument(file_path) as pdf_doc:
+                for page_idx in range(total_pages):
+                    # Skip pages where fitz already has good text
+                    if fitz_text_cache and page_idx < len(fitz_text_cache):
+                        page_text = fitz_text_cache[page_idx]
+                        keywords = ["court", "claimant", "petitioner", "respondent", "accident",
+                                   "compensation", "tribunal", "judgment", "deceased", "injured"]
+                        hits = sum(1 for kw in keywords if kw in page_text.lower())
+                        if len(page_text.strip()) > 200 and hits >= 2:
+                            rendered_image_paths[page_idx] = None  # Signal: use fitz text directly
+                            continue
+
+                    try:
+                        page = pdf_doc[page_idx]
+                        bitmap = page.render(scale=scale)
+                        pil_img = bitmap.to_pil()
+                        del bitmap, page
+
+                        # Apply memory guard
+                        pil_img = guard_and_downscale_image(pil_img)
+
+                        # Save to temp file
+                        img_path = os.path.join(render_dir, f"page_{page_idx:04d}.png")
+                        pil_img.save(img_path, format="PNG")
+                        rendered_image_paths[page_idx] = img_path
+                        del pil_img
+                        gc.collect()
+
+                    except Exception as e:
+                        logger.error(f"Failed to pre-render page {page_idx+1}: {e}")
+                        rendered_image_paths[page_idx] = "error"
+
+        except Exception as e:
+            logger.error(f"Critical failure during sequential pre-rendering: {e}")
+
+        logger.info(f"Pre-rendering complete. {len(rendered_image_paths)} pages mapped. Starting parallel OCR...")
+
+        # ============================================================
+        # NOW run OCR in parallel — reading from pre-rendered PNGs
+        # No more concurrent pdfium opens
+        # ============================================================
+        page_results = {}
+        total_ocr_duration = 0.0
+
+        import concurrent.futures
+
+        def process_pre_rendered_page(idx):
+            try:
+                page_num = idx + 1
+                start = time.time()
+
+                img_path = rendered_image_paths.get(idx)
+
+                # Case 1: fitz text is good — return it directly
+                if img_path is None:
+                    page_text = fitz_text_cache[idx]
+                    lines = [l.strip() for l in page_text.split("\n") if l.strip()]
+                    elapsed = time.time() - start
+                    meta = {
+                        "page": page_num, "engine": "PyMuPDF", "dpi": 72,
+                        "confidence": 1.0, "text_length": len(page_text),
+                        "quality_score": 1.0, "preprocessing_applied": [],
+                        "lines": len(lines), "ocr_boxes": [],
+                        "render_time": 0.0, "ocr_time": elapsed,
+                        "total_page_time": elapsed
+                    }
+                    return idx, lines, meta
+
+                # Case 2: render failed
+                if img_path == "error":
+                    meta = {
+                        "page": page_num, "engine": "Error", "dpi": OCR_RENDER_DPI,
+                        "confidence": 0.0, "text_length": 0, "quality_score": 0.0,
+                        "preprocessing_applied": [], "lines": 0, "ocr_boxes": [],
+                        "render_time": 0.0, "ocr_time": 0.0, "total_page_time": 0.0
+                    }
+                    return idx, [], meta
+
+                # Case 3: OCR the pre-rendered image
+                ocr_start = time.time()
+                pil_img = Image.open(img_path).convert("RGB")
+
+                # Visual classifier
+                classification = classify_scanned_page(pil_img)
+
+                if classification == "blank":
+                    del pil_img
+                    gc.collect()
+                    elapsed = time.time() - start
+                    meta = {
+                        "page": page_num, "engine": "Skipped-blank", "dpi": OCR_RENDER_DPI,
+                        "confidence": 1.0, "text_length": 0, "quality_score": 0.0,
+                        "preprocessing_applied": [], "lines": 0, "ocr_boxes": [],
+                        "render_time": 0.0, "ocr_time": 0.0, "total_page_time": elapsed
+                    }
+                    return idx, [], meta
+
+                # Lightweight preprocessing
+                processed_img = preprocess_image_light(pil_img, binarize=False)
+                del pil_img
+                gc.collect()
+
+                lines = []
+                conf = 0.0
+                ocr_boxes = []
+                engine_used = ""
+
+                if classification == "low-content":
+                    lines, conf, ocr_boxes = run_tesseract_fallback(processed_img, extract_boxes=False)
+                    engine_used = "Tesseract"
+                else:
+                    # PaddleOCR via temp file
+                    temp_img_path = None
+                    paddle_success = False
+                    try:
+                        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                            temp_img_path = tmp.name
+                            processed_img.save(temp_img_path)
+
+                        result = get_ocr_instance().ocr(temp_img_path) if get_ocr_instance() else None
+                        if result:
+                            lines = extract_text_lines_from_paddle_result(result)
+                            conf = calculate_paddle_confidence(result)
+                            ocr_boxes = extract_ocr_boxes_from_paddle_result(result)
+                            if conf == 0.0 and len(lines) >= 15:
+                                conf = 0.85
+                            non_ws = sum(len(l.strip()) for l in lines)
+                            if len(lines) > 0 and conf >= 0.50 and non_ws >= 15:
+                                engine_used = "PaddleOCR"
+                                paddle_success = True
+                    finally:
+                        if temp_img_path and os.path.exists(temp_img_path):
+                            try:
+                                os.unlink(temp_img_path)
+                            except Exception:
+                                pass
+
+                    if not paddle_success:
+                        lines, conf, ocr_boxes = run_tesseract_fallback(processed_img, extract_boxes=False)
+                        engine_used = "Tesseract"
+
+                del processed_img
+                gc.collect()
+
+                ocr_time = time.time() - ocr_start
+                q_score = score_ocr_page_quality(lines)
+                is_poor = (len(lines) == 0 or q_score < 0.15 or conf < 0.30)
+
+                # Inline retry at higher DPI if poor quality
+                if is_poor and classification != "blank" and OCR_RETRY_DPI > OCR_RENDER_DPI:
+                    logger.info(f"Page {page_num}: Poor quality, retrying at {OCR_RETRY_DPI} DPI...")
+                    try:
+                        retry_img_path = os.path.join(render_dir, f"page_{idx:04d}_retry.png")
+                        if not os.path.exists(retry_img_path):
+                            # Re-render at higher DPI using fitz (safe, single page)
+                            import fitz
+                            with fitz.open(file_path) as retry_doc:
+                                retry_page = retry_doc[idx]
+                                retry_mat = fitz.Matrix(OCR_RETRY_DPI / 72.0, OCR_RETRY_DPI / 72.0)
+                                retry_pix = retry_page.get_pixmap(matrix=retry_mat, alpha=False)
+                                retry_img = Image.frombytes("RGB", [retry_pix.width, retry_pix.height], retry_pix.samples)
+                                retry_img = guard_and_downscale_image(retry_img)
+                                retry_img.save(retry_img_path)
+                                del retry_pix, retry_page, retry_img
+
+                        retry_pil = Image.open(retry_img_path).convert("RGB")
+                        retry_processed = preprocess_image_light(retry_pil, binarize=False)
+                        del retry_pil
+
+                        retry_temp = None
+                        try:
+                            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                                retry_temp = tmp.name
+                                retry_processed.save(retry_temp)
+                            retry_result = get_ocr_instance().ocr(retry_temp) if get_ocr_instance() else None
+                            if retry_result:
+                                retry_lines = extract_text_lines_from_paddle_result(retry_result)
+                                retry_conf = calculate_paddle_confidence(retry_result)
+                                if len(retry_lines) > len(lines) or retry_conf > conf:
+                                    lines = retry_lines
+                                    conf = retry_conf
+                                    ocr_boxes = extract_ocr_boxes_from_paddle_result(retry_result)
+                                    engine_used = "PaddleOCR-Retry"
+                                    q_score = score_ocr_page_quality(lines)
+                        finally:
+                            if retry_temp and os.path.exists(retry_temp):
+                                os.unlink(retry_temp)
+                            del retry_processed
+                            gc.collect()
+                    except Exception as retry_err:
+                        logger.warning(f"Retry at higher DPI failed for page {page_num}: {retry_err}")
+
+                elapsed = time.time() - start
+                try:
+                    ram_mb = int(psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024))
+                    ram_str = f"{ram_mb}MB"
+                except Exception:
+                    ram_str = "N/A"
+                logger.info(f"Page {page_num}: Engine={engine_used}, OCR={ocr_time:.2f}s, Total={elapsed:.2f}s, RAM={ram_str}")
+
+                meta = {
+                    "page": page_num, "engine": engine_used, "dpi": OCR_RENDER_DPI,
+                    "confidence": round(conf, 3), "text_length": sum(len(l) for l in lines),
+                    "quality_score": q_score,
+                    "preprocessing_applied": ["grayscale", "adaptive_contrast_enhancement", "mild_denoising"],
+                    "lines": len(lines), "ocr_boxes": ocr_boxes,
+                    "render_time": 0.0, "ocr_time": ocr_time, "total_page_time": elapsed
+                }
+                return idx, lines, meta
+
+            except Exception as ex:
+                logger.error(f"Error during parallel OCR on page {idx+1}: {ex}")
+                meta = {
+                    "page": idx+1, "engine": "Error", "dpi": OCR_RENDER_DPI,
+                    "confidence": 0.0, "text_length": 0, "quality_score": 0.0,
+                    "preprocessing_applied": [], "lines": 0, "ocr_boxes": [],
+                    "render_time": 0.0, "ocr_time": 0.0, "total_page_time": 0.0
+                }
+                return idx, [], meta
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=OCR_MAX_PARALLEL_WORKERS) as executor:
-            futures = [executor.submit(process_page, idx) for idx in range(total_pages)]
-            
+            futures = [executor.submit(process_pre_rendered_page, idx) for idx in range(total_pages)]
             for future in concurrent.futures.as_completed(futures):
                 idx, page_lines, page_meta = future.result()
                 page_results[idx] = (page_lines, page_meta)
-                
                 if "ocr_time" in page_meta:
                     total_ocr_duration += page_meta["ocr_time"]
-                
                 if progress_callback:
                     progress_callback(int((len(page_results) / total_pages) * 95))
 
-        # Log total performance stats
+        # Cleanup pre-rendered images
+        try:
+            shutil.rmtree(render_dir)
+            logger.info(f"Cleaned up pre-render temp dir: {render_dir}")
+        except Exception as e:
+            logger.warning(f"Failed to clean up render dir {render_dir}: {e}")
+
+        # --- COMPILE RESULTS (unchanged from original) ---
         avg_ocr_time = total_ocr_duration / total_pages if total_pages else 0.0
         logger.info(f"PDF Total: OCR = {total_ocr_duration:.2f}s, Average OCR Per Page = {avg_ocr_time:.2f}s")
 
-        # --- COMPILE SEQUENTIAL RESULTS ---
         text_lines = []
         failed_pages = []
         successful_pages = []
@@ -1070,16 +1268,15 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
         page_confidences = []
         fallback_engine_used = ""
         page_details = []
-
         total_retry_count = 0
+
         for idx in range(total_pages):
             page_num = idx + 1
             page_lines, page_meta = page_results[idx]
-            
             q = page_meta.get("quality_score", 0.0)
             conf = page_meta.get("confidence", 0.0)
             engine = page_meta.get("engine", "PaddleOCR")
-            
+
             if page_meta.get("dpi") == OCR_RETRY_DPI:
                 total_retry_count += 1
 
@@ -1109,7 +1306,6 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
             sum(len(l) for l in real_lines) / max(len(real_lines), 1) / 80.0, 3
         ) if real_lines else 0.0
 
-        elapsed_time = time.time() - start_time
         ocr_debug = _build_ocr_debug(
             engine_used="PaddleOCR",
             retry_count=total_retry_count,
@@ -1125,7 +1321,7 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
             total_ocr_time=elapsed_time
         )
 
-        # Generate searchable PDF asynchronously in the background to not block main execution
+        # Background searchable PDF generation (unchanged)
         filename = original_filename or os.path.basename(file_path)
         base_name, _ = os.path.splitext(filename)
         output_filename = f"{base_name}_ocr.pdf"
@@ -1136,7 +1332,7 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
         bg_temp_path = os.path.join(bg_temp_dir, os.path.basename(file_path))
         try:
             shutil.copy(file_path, bg_temp_path)
-            
+
             def bg_pdf_worker(src_path, pg_details, orig_name, temp_dir):
                 try:
                     logger.info(f"Background thread starting searchable PDF generation for {orig_name}...")
@@ -1146,16 +1342,15 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
                 finally:
                     try:
                         shutil.rmtree(temp_dir)
-                        logger.info(f"Background cleanup: deleted temp directory {temp_dir}")
-                    except Exception as ex:
-                        logger.warning(f"Failed to delete background temp folder {temp_dir}: {ex}")
-            
+                    except Exception:
+                        pass
+
             threading.Thread(
-                target=bg_pdf_worker, 
-                args=(bg_temp_path, page_details, filename, bg_temp_dir), 
+                target=bg_pdf_worker,
+                args=(bg_temp_path, page_details, filename, bg_temp_dir),
                 daemon=True
             ).start()
-            
+
         except Exception as e:
             logger.error(f"Failed to setup background searchable PDF copy task: {e}")
             try:
