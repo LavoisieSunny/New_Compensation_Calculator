@@ -897,7 +897,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     async function handleSinglePdfUpload(file) {
-        if (file.type !== "application/pdf") {
+        const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+        if (!isPdf) {
             alert("Please upload a valid legal PDF case document.");
             return;
         }
@@ -1047,7 +1048,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
-            if (file.type === "application/pdf") {
+            const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+            if (isPdf) {
                 formData.append("files", file);
                 validPdfCount++;
                 
