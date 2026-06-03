@@ -114,6 +114,18 @@
                                         <input type="file" id="single-file-input" accept="application/pdf" style="display: none;">
                                     </div>
                                 </div>
+                                
+                                <!-- Premium Live OCR Timer Container -->
+                                <div id="ocr-timer-container" class="ocr-timer-container hidden-section" style="margin-top: 12px; padding: 12px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-panel); display: none; align-items: center; justify-content: space-between; gap: 12px;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span id="ocr-timer-status-icon" style="display: inline-flex; align-items: center; justify-content: center;"><i class="fa-solid fa-spinner fa-spin text-glow" style="color: var(--color-primary);"></i></span>
+                                        <span id="ocr-timer-status-text" style="font-weight: 500; font-size: 0.85rem; color: var(--text-primary);">Processing PDF...</span>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 6px; font-family: monospace; font-size: 0.95rem; font-weight: 700; color: var(--color-primary);">
+                                        <span id="ocr-timer-clock-icon">⏱</span>
+                                        <span id="ocr-timer-elapsed">00:00</span>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Common Information Container -->
@@ -565,6 +577,10 @@
                                             <span class="label">Text Density Score</span>
                                             <span class="value" id="ocr-val-density">—</span>
                                         </div>
+                                        <div class="metric-item">
+                                            <span class="label">Total OCR Duration</span>
+                                            <span class="value" id="ocr-val-duration">—</span>
+                                        </div>
                                     </div>
                                     
                                     <!-- Page Breakdown Summary Table -->
@@ -577,13 +593,14 @@
                                                         <th style="padding: 8px 12px;">Page</th>
                                                         <th style="padding: 8px 12px;">Engine</th>
                                                         <th style="padding: 8px 12px;">DPI</th>
+                                                        <th style="padding: 8px 12px; text-align: right;">Time</th>
                                                         <th style="padding: 8px 12px; text-align: right;">Confidence</th>
                                                         <th style="padding: 8px 12px; text-align: right;">Quality</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody id="ocr-pages-table-body">
                                                     <tr>
-                                                        <td colspan="5" style="padding: 16px; text-align: center; color: var(--text-muted);">
+                                                        <td colspan="6" style="padding: 16px; text-align: center; color: var(--text-muted);">
                                                             No pages scanned yet. Please upload a PDF to inspect.
                                                         </td>
                                                     </tr>

@@ -21,6 +21,94 @@ document.addEventListener("DOMContentLoaded", () => {
     let lastExtractedFields = {};
     let lastExtractedConfidences = {};
 
+    // --- OCR LIVE TIMER STATE & HELPERS ---
+    let ocrTimerInterval = null;
+    let ocrSecondsElapsed = 0;
+
+    function formatTimeMMSS(totalSeconds) {
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+
+    function startOcrTimer() {
+        if (ocrTimerInterval) {
+            clearInterval(ocrTimerInterval);
+        }
+        ocrSecondsElapsed = 0;
+        
+        const timerContainer = document.getElementById("ocr-timer-container");
+        const statusIcon = document.getElementById("ocr-timer-status-icon");
+        const statusText = document.getElementById("ocr-timer-status-text");
+        const elapsedText = document.getElementById("ocr-timer-elapsed");
+        
+        if (timerContainer) {
+            timerContainer.classList.remove("hidden-section");
+            timerContainer.style.display = "flex";
+        }
+        if (statusIcon) {
+            statusIcon.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-glow" style="color: var(--color-primary);"></i>`;
+        }
+        if (statusText) {
+            statusText.textContent = "Processing PDF...";
+        }
+        if (elapsedText) {
+            elapsedText.textContent = "00:00";
+        }
+        
+        ocrTimerInterval = setInterval(() => {
+            ocrSecondsElapsed++;
+            const formattedTime = formatTimeMMSS(ocrSecondsElapsed);
+            if (elapsedText) {
+                elapsedText.textContent = formattedTime;
+            }
+            const loaderTimer = document.getElementById("ocr-loader-timer");
+            if (loaderTimer) {
+                loaderTimer.textContent = formattedTime;
+            }
+        }, 1000);
+    }
+
+    function stopOcrTimerSuccess() {
+        if (ocrTimerInterval) {
+            clearInterval(ocrTimerInterval);
+            ocrTimerInterval = null;
+        }
+        const statusIcon = document.getElementById("ocr-timer-status-icon");
+        const statusText = document.getElementById("ocr-timer-status-text");
+        const elapsedText = document.getElementById("ocr-timer-elapsed");
+        
+        if (statusIcon) {
+            statusIcon.innerHTML = `<i class="fa-solid fa-circle-check" style="color: var(--color-success);"></i>`;
+        }
+        if (statusText) {
+            statusText.textContent = "✅ OCR Complete";
+        }
+        if (elapsedText) {
+            elapsedText.textContent = `Total Time: ${formatTimeMMSS(ocrSecondsElapsed)}`;
+        }
+    }
+
+    function stopOcrTimerFailure() {
+        if (ocrTimerInterval) {
+            clearInterval(ocrTimerInterval);
+            ocrTimerInterval = null;
+        }
+        const statusIcon = document.getElementById("ocr-timer-status-icon");
+        const statusText = document.getElementById("ocr-timer-status-text");
+        const elapsedText = document.getElementById("ocr-timer-elapsed");
+        
+        if (statusIcon) {
+            statusIcon.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color: var(--color-danger);"></i>`;
+        }
+        if (statusText) {
+            statusText.textContent = "❌ OCR Failed";
+        }
+        if (elapsedText) {
+            elapsedText.textContent = `OCR Failed after ${formatTimeMMSS(ocrSecondsElapsed)}`;
+        }
+    }
+
     // Programmatically Inject Suggestion Badge CSS Styles
     const styleEl = document.createElement("style");
     styleEl.innerHTML = `
@@ -462,6 +550,11 @@ document.addEventListener("DOMContentLoaded", () => {
     caseTypeSelect.addEventListener("change", (e) => {
         const caseType = e.target.value;
         
+        const existingBadge = document.querySelector(`.suggested-badge[data-field="case_type"]`);
+        if (existingBadge) {
+            existingBadge.remove();
+        }
+        
         sharedFields.classList.remove("show");
         sharedFields.classList.add("hidden-section");
         
@@ -763,6 +856,9 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
+        // Start the Live OCR timer
+        startOcrTimer();
+
         // Show a premium glassmorphic loading spinner inside the form panel
         const formPanel = document.querySelector("#tab-calculator .panel.scroll-y");
         const loader = document.createElement("div");
@@ -771,6 +867,10 @@ document.addEventListener("DOMContentLoaded", () => {
             <div class="spinner-glow"></div>
             <p>Analyzing document with legal OCR...</p>
             <span style="font-size: 0.8rem; color: var(--text-secondary); opacity: 0.8;">Extracting Judgment, Petition, &amp; Prayer sections</span>
+            <div style="margin-top: 12px; font-family: monospace; font-size: 1.15rem; font-weight: 700; color: var(--color-primary); display: flex; align-items: center; gap: 8px; justify-content: center;">
+                <span>⏱</span>
+                <span id="ocr-loader-timer">00:00</span>
+            </div>
         `;
         formPanel.style.position = "relative";
         formPanel.appendChild(loader);
@@ -794,6 +894,9 @@ document.addEventListener("DOMContentLoaded", () => {
             loader.remove();
 
             if (data.success) {
+                // Stop timer on success
+                stopOcrTimerSuccess();
+
                 // Apply OCR suggestions automatically
                 applyAllOcrSuggestions(data.suggestions);
 
@@ -841,10 +944,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 showToast("Case PDF analyzed! Form auto-filled focusing on Previous Judgment, Petition, and Prayer details. Please manually review fields.", "success");
             } else {
+                stopOcrTimerFailure();
                 showToast("Failed to extract data from the PDF: " + (data.message || "Unknown OCR error."), "error");
             }
         } catch (error) {
             loader.remove();
+            stopOcrTimerFailure();
             console.error("Single PDF OCR error:", error);
             showToast(`OCR processing failed: ${error.message}. Please verify the central FastAPI server is fully initialized.`, "error");
         }
@@ -1310,6 +1415,40 @@ document.addEventListener("DOMContentLoaded", () => {
         if (currentCaseType && currentCaseType !== "") {
             if (suggestionsCaseType && suggestionsCaseType !== currentCaseType) {
                 overwriteBlocked = true;
+                
+                // Show interactive suggestion badge under case type dropdown
+                const parent = caseTypeSelect.closest(".form-group");
+                if (parent) {
+                    const badge = document.createElement("div");
+                    badge.className = "suggested-badge ai-metadata-badge";
+                    badge.setAttribute("data-field", "case_type");
+                    
+                    const displayVal = suggestionsCaseType === "injury" ? "Injury Case" : "Death Case";
+                    // Find confidence score for case_type if available, default to 95%
+                    let conf = 0.95;
+                    if (confidenceScores && confidenceScores.case_type) {
+                        conf = confidenceScores.case_type.confidence !== undefined 
+                            ? confidenceScores.case_type.confidence 
+                            : confidenceScores.case_type;
+                    } else if (suggestions.confidence_scores && suggestions.confidence_scores.case_type) {
+                        conf = suggestions.confidence_scores.case_type.confidence !== undefined 
+                            ? suggestions.confidence_scores.case_type.confidence 
+                            : suggestions.confidence_scores.case_type;
+                    }
+                    conf = typeof conf === "number" ? conf : parseFloat(conf) || 0.95;
+                    if (conf > 1.0) conf = conf / 100.0;
+                    
+                    badge.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> Suggest: ${displayVal} (${Math.round(conf * 100)}%)`;
+                    
+                    badge.addEventListener("click", () => {
+                        caseTypeSelect.value = suggestionsCaseType;
+                        caseTypeSelect.dispatchEvent(new Event("change"));
+                        badge.remove();
+                        showToast(`Switched to suggested Case Type: ${displayVal}!`, "success");
+                    });
+                    
+                    parent.appendChild(badge);
+                }
             }
             suggestionsCaseType = currentCaseType;
         } else {
@@ -1987,6 +2126,12 @@ document.addEventListener("DOMContentLoaded", () => {
         
         const dEl = document.getElementById("ocr-val-density");
         if (dEl) dEl.textContent = textDensity.toFixed(3);
+
+        const durationEl = document.getElementById("ocr-val-duration");
+        if (durationEl) {
+            const durationSec = debug.total_ocr_time !== undefined ? debug.total_ocr_time : ocrSecondsElapsed;
+            durationEl.textContent = typeof durationSec === "number" ? formatTimeMMSS(Math.round(durationSec)) : durationSec || "—";
+        }
         
         // Update badge
         const badge = document.getElementById("ocr-inspector-badge");
@@ -2013,6 +2158,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     const pageNum = p.page || 1;
                     const engine = p.engine || "PaddleOCR";
                     const dpi = p.dpi || 180;
+                    const pageTime = p.total_page_time !== undefined ? p.total_page_time.toFixed(2) + "s" : "—";
                     const conf = p.confidence !== undefined ? (p.confidence * 100).toFixed(1) + "%" : "—";
                     const quality = p.quality_score !== undefined ? p.quality_score.toFixed(3) : "—";
                     
@@ -2020,6 +2166,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         <td style="padding: 8px 12px; font-weight: 600; color: var(--text-primary);">Page ${pageNum}</td>
                         <td style="padding: 8px 12px; color: var(--text-secondary);">${engine}</td>
                         <td style="padding: 8px 12px; color: var(--text-secondary);">${dpi} DPI</td>
+                        <td style="padding: 8px 12px; text-align: right; font-family: monospace; color: var(--text-secondary);">${pageTime}</td>
                         <td style="padding: 8px 12px; text-align: right; font-family: monospace; color: var(--color-success);">${conf}</td>
                         <td style="padding: 8px 12px; text-align: right; font-family: monospace; color: var(--color-primary);">${quality}</td>
                     `;
@@ -2028,7 +2175,7 @@ document.addEventListener("DOMContentLoaded", () => {
             } else {
                 tableBody.innerHTML = `
                     <tr>
-                        <td colspan="5" style="padding: 16px; text-align: center; color: var(--text-muted);">
+                        <td colspan="6" style="padding: 16px; text-align: center; color: var(--text-muted);">
                             No page details returned.
                         </td>
                     </tr>
