@@ -1086,6 +1086,9 @@ document.addEventListener("DOMContentLoaded", () => {
                             // Stop timer on success
                             stopOcrTimerSuccess();
 
+                            // TEMPORARY: Log OCR suggestions structure
+                            console.log("OCR suggestions structure:", JSON.stringify(data.suggestions, null, 2));
+
                             // Apply OCR suggestions automatically
                             applyAllOcrSuggestions(data.suggestions);
 
@@ -1574,6 +1577,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Apply parsed suggestions
     function applyAllOcrSuggestions(suggestions, confidenceScores = null, ocrEvidence = null, rawRecovered = null) {
+        if (!suggestions) return;
+
+        // Normalize flat suggestions into expected nested structure
+        if (suggestions && !suggestions.fields) {
+            const { case_type, low_confidence_fields, ocr_quality_insufficient, 
+                    ocr_warning, partial_extraction_recovery_mode, 
+                    fallback_source_used, award_amount, total_compensation,
+                    ai_recovery_triggered, ...fieldValues } = suggestions;
+            suggestions = {
+                case_type: case_type,
+                fields: fieldValues,
+                low_confidence_fields: low_confidence_fields || [],
+                ocr_quality_insufficient: ocr_quality_insufficient,
+                ocr_warning: ocr_warning,
+                fallback_source_used: fallback_source_used
+            };
+        }
+
         // Clear all previous low-confidence warning labels, styles, and AI metadata badges
         document.querySelectorAll(".verification-warning").forEach(el => el.remove());
         document.querySelectorAll(".low-confidence-input").forEach(el => el.classList.remove("low-confidence-input"));
