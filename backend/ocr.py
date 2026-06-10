@@ -1306,6 +1306,7 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
             sum(len(l) for l in real_lines) / max(len(real_lines), 1) / 80.0, 3
         ) if real_lines else 0.0
 
+        elapsed_time = time.time() - start_time
         ocr_debug = _build_ocr_debug(
             engine_used="PaddleOCR",
             retry_count=total_retry_count,
