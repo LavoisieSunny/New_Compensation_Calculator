@@ -76,12 +76,9 @@ def get_ocr_instance():
                 logger.info("Initializing PaddleOCR Singleton...")
                 from paddleocr import PaddleOCR
                 _ocr_instance = PaddleOCR(
-                    use_angle_cls=False,
-                    use_gpu=False,
-                    enable_mkldnn=False,
+                    use_textline_orientation=True,
                     text_detection_model_name="PP-OCRv5_mobile_det",
                     text_recognition_model_name="en_PP-OCRv5_mobile_rec",
-                    show_log=False,
                 )
                 OCR_INITIALIZED = True
                 logger.info("PaddleOCR Singleton loaded!")
