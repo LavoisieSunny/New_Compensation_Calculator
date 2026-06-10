@@ -1878,6 +1878,7 @@ async def get_batch_status():
             "progress": item.get("progress"),
             "error": item.get("error"),
             "suggestions": item.get("suggestions"),
+            "raw_text": item.get("raw_text", []),
         }
         ocr_debug = item.get("ocr_debug")
         if ocr_debug:

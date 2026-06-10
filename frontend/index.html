@@ -843,6 +843,56 @@
         </div>
 
         <!-- ==========================================
+             AUTO-FILL CHOICE SELECTION MODAL
+             ========================================== -->
+        <div id="autofill-choice-modal" class="modal">
+            <div class="modal-content" style="max-width: 500px;">
+                <div class="modal-header" style="border-bottom: 1px solid var(--border-glass);">
+                    <h2><i class="fa-solid fa-wand-magic-sparkles text-glow" style="color: var(--color-primary);"></i> Select Auto-Fill Mode</h2>
+                    <button type="button" id="close-autofill-choice-btn" class="close-btn">&times;</button>
+                </div>
+                <div class="modal-body" style="padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+                    <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5; margin: 0; margin-bottom: 8px;">
+                        How would you like to auto-fill the compensation workstation using this indexed document?
+                    </p>
+                    
+                    <!-- Choice 1: Quick OCR -->
+                    <button type="button" id="btn-quick-autofill" class="choice-card btn-quick">
+                        <div class="choice-card-icon">
+                            <i class="fa-solid fa-bolt"></i>
+                        </div>
+                        <div class="choice-card-content">
+                            <div class="choice-card-title">
+                                Quick OCR Auto-fill <span class="choice-badge badge-fast">FAST</span>
+                            </div>
+                            <div class="choice-card-desc">
+                                Instantly applies pre-parsed heuristic data extracted during indexing.
+                            </div>
+                        </div>
+                    </button>
+
+                    <!-- Choice 2: AI LLM Deep Extraction -->
+                    <button type="button" id="btn-ai-autofill" class="choice-card btn-smart">
+                        <div class="choice-card-icon">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        </div>
+                        <div class="choice-card-content">
+                            <div class="choice-card-title">
+                                AI LLM Deep Extraction <span class="choice-badge badge-smart">SMART</span>
+                            </div>
+                            <div class="choice-card-desc">
+                                Runs the local LLM on the raw text to recover complex/missing fields.
+                            </div>
+                        </div>
+                    </button>
+                </div>
+                <div class="modal-footer" style="border-top: 1px solid var(--border-glass);">
+                    <button type="button" id="dismiss-autofill-choice-btn" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==========================================
              QDRANT PAYLOAD DETAIL VIEW MODAL
              ========================================== -->
         <div id="qdrant-payload-modal" class="modal">

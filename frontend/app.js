@@ -1329,25 +1329,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Bind clicks on autofill buttons
         document.querySelectorAll(".autofill-queue-btn").forEach(btn => {
-            btn.addEventListener("click", () => {
+            btn.addEventListener("click", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 const id = btn.getAttribute("data-id");
                 const matchedFile = fileQueue.find(f => f.file_id === id);
-                if (matchedFile && matchedFile.suggestions) {
-                    // Stop timer and set to complete if it was ticking
-                    stopOcrTimerSuccess();
-                    
-                    applyAllOcrSuggestions(matchedFile.suggestions);
-                    
-                    // Update OCR Inspector tab with telemetry from the batch loaded file
-                    if (matchedFile.ocr_debug) {
-                        updateOcrInspector(matchedFile);
-                        triggerTabNotification("ocr-quality");
-                    }
-                    
-                    window.lastRawText = (matchedFile.raw_text || []).join("\n");
-                    checkCaseType(caseTypeSelect.value, window.lastRawText);
-                    
-                    switchTab("calculator");
+                if (matchedFile) {
+                    showAutofillChoiceModal(matchedFile);
                 }
             });
         });
@@ -1355,6 +1343,176 @@ document.addEventListener("DOMContentLoaded", () => {
         // Sync chatbot document filter select options
         syncChatDocumentFilter();
     }
+
+    // Open Autofill Selection Modal to choose between OCR and AI Deep Extraction
+    function showAutofillChoiceModal(matchedFile) {
+        const choiceModal = document.getElementById("autofill-choice-modal");
+        if (!choiceModal) return;
+
+        const quickBtn = document.getElementById("btn-quick-autofill");
+        const aiBtn = document.getElementById("btn-ai-autofill");
+        const cancelBtn = document.getElementById("dismiss-autofill-choice-btn");
+        const closeBtn = document.getElementById("close-autofill-choice-btn");
+
+        // Clone buttons to clear previous event listeners cleanly
+        const newQuickBtn = quickBtn.cloneNode(true);
+        const newAiBtn = aiBtn.cloneNode(true);
+        quickBtn.parentNode.replaceChild(newQuickBtn, quickBtn);
+        aiBtn.parentNode.replaceChild(newAiBtn, aiBtn);
+
+        // Bind quick OCR path
+        newQuickBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            choiceModal.classList.remove("open");
+            if (matchedFile.suggestions) {
+                stopOcrTimerSuccess();
+                
+                // Store raw text for AI data recovery if they want to click it manually later
+                currentOcrRawText = matchedFile.raw_text || [];
+                if (aiExtractBtn) {
+                    if (currentOcrRawText.length > 0) {
+                        aiExtractBtn.style.display = "inline-flex";
+                    } else {
+                        aiExtractBtn.style.display = "none";
+                    }
+                }
+
+                // Update workstation preview card with the batch-loaded PDF if possible
+                const fileObj = uploadedFileObjects[matchedFile.filename];
+                if (fileObj && singlePreviewContainer && singlePreviewFilename) {
+                    const blobUrl = URL.createObjectURL(fileObj);
+                    singlePreviewFilename.innerHTML = `${matchedFile.filename} <span class="badge source-badge" style="margin-left: 8px; background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; display: inline-block;">Source: Batch Library</span>`;
+                    singlePreviewContainer.innerHTML = `
+                        <iframe class="pdf-iframe" src="${blobUrl}#toolbar=0" width="100%" height="100%"></iframe>
+                    `;
+                    if (singlePreviewCard) {
+                        singlePreviewCard.classList.remove("hidden-section");
+                        singlePreviewCard.classList.add("show");
+                    }
+                }
+
+                applyAllOcrSuggestions(matchedFile.suggestions);
+                
+                if (matchedFile.ocr_debug) {
+                    updateOcrInspector(matchedFile);
+                    triggerTabNotification("ocr-quality");
+                }
+                
+                window.lastRawText = (matchedFile.raw_text || []).join("\n");
+                checkCaseType(caseTypeSelect.value, window.lastRawText);
+                
+                switchTab("calculator");
+            } else {
+                showToast("No pre-parsed heuristic data available for this file.", "warning");
+            }
+        });
+
+        // Bind AI LLM Deep Extraction path
+        newAiBtn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+
+            // Validate that we have raw text before attempting LLM recovery
+            const rawTextLines = matchedFile.raw_text || [];
+            if (rawTextLines.length === 0) {
+                showToast("No raw OCR text is available for this file to perform AI recovery.", "warning");
+                choiceModal.classList.remove("open");
+                return;
+            }
+
+            choiceModal.classList.remove("open");
+            
+            // Set currentOcrRawText from batch file
+            currentOcrRawText = rawTextLines;
+            window.lastRawText = currentOcrRawText.join("\n");
+            checkCaseType(caseTypeSelect.value, window.lastRawText);
+
+            if (aiExtractBtn) {
+                aiExtractBtn.style.display = "inline-flex";
+            }
+
+            // Update workstation preview card with the batch-loaded PDF if possible
+            const fileObj = uploadedFileObjects[matchedFile.filename];
+            if (fileObj && singlePreviewContainer && singlePreviewFilename) {
+                const blobUrl = URL.createObjectURL(fileObj);
+                singlePreviewFilename.innerHTML = `${matchedFile.filename} <span class="badge source-badge" style="margin-left: 8px; background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; display: inline-block;">Source: Batch Library</span>`;
+                singlePreviewContainer.innerHTML = `
+                    <iframe class="pdf-iframe" src="${blobUrl}#toolbar=0" width="100%" height="100%"></iframe>
+                `;
+                if (singlePreviewCard) {
+                    singlePreviewCard.classList.remove("hidden-section");
+                    singlePreviewCard.classList.add("show");
+                }
+            }
+
+            // Switch to workstation tab
+            switchTab("calculator");
+
+            // Show spinning loader overlay in workstation panel
+            const formPanel = document.querySelector("#tab-calculator .panel.scroll-y");
+            if (!formPanel) return;
+            
+            const loader = document.createElement("div");
+            loader.className = "form-ocr-loader";
+            loader.innerHTML = `
+                <div class="spinner-glow"></div>
+                <p>AI Legal LLM is parsing text...</p>
+                <span style="font-size: 0.8rem; color: var(--text-secondary); opacity: 0.8;">Recovering missing legal compensation entities</span>
+            `;
+            formPanel.style.position = "relative";
+            formPanel.appendChild(loader);
+
+            try {
+                // Call backend
+                const response = await fetch("/api/ocr/ai-recover", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ raw_text: currentOcrRawText })
+                });
+
+                loader.remove();
+
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.detail || "AI recovery API returned error status");
+                }
+                const data = await response.json();
+
+                if (data.success) {
+                    const confidenceScores = data.raw_recovered ? data.raw_recovered.confidence_scores : null;
+                    const ocrEvidence = data.raw_recovered ? data.raw_recovered.ocr_evidence_case : null;
+                    
+                    // Apply suggestions exactly the same way as clicking "Ask LLM to Extract" manually
+                    applyAllOcrSuggestions(data.suggestions, confidenceScores, ocrEvidence, data.raw_recovered);
+                    showToast("AI data extraction complete! All recovered parameters cached internally.", "success");
+                } else {
+                    showToast("AI extraction failed to extract fields.", "error");
+                }
+            } catch (error) {
+                if (loader) loader.remove();
+                console.error("AI recovery failed:", error);
+                showToast(`AI extraction failed: ${error.message}`, "error");
+            }
+        });
+
+        // Close on cancel/close
+        const closeHandler = (e) => {
+            if (e) e.stopPropagation();
+            choiceModal.classList.remove("open");
+        };
+        cancelBtn.onclick = closeHandler;
+        closeBtn.onclick = closeHandler;
+
+        // Open modal
+        choiceModal.classList.add("open");
+    }
+
+    // Close choice modal when clicking outside content area
+    window.addEventListener("click", (e) => {
+        const choiceModal = document.getElementById("autofill-choice-modal");
+        if (e.target === choiceModal) {
+            choiceModal.classList.remove("open");
+        }
+    });
 
     // High-Fidelity local Blob URL previewing
     function loadPdfPreview(filename) {
@@ -1804,7 +1962,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 loader.remove();
 
-                if (!response.ok) throw new Error("AI recovery API returned error status");
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.detail || "AI recovery API returned error status");
+                }
                 const data = await response.json();
 
                 if (data.success) {

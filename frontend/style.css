@@ -2815,3 +2815,121 @@ select.low-confidence-input {
     font-family: monospace;
     font-size: 0.75rem;
 }
+
+/* --- AUTOFILL CHOICE MODAL PREMIUM STYLING --- */
+.choice-card {
+    display: flex !important;
+    align-items: center !important;
+    gap: 16px !important;
+    padding: 18px !important;
+    width: 100% !important;
+    text-align: left !important;
+    background: rgba(255, 255, 255, 0.02) !important;
+    border: 1px solid var(--border-glass) !important;
+    border-radius: 10px !important;
+    cursor: pointer !important;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    position: relative !important;
+    overflow: hidden !important;
+    margin-bottom: 12px !important;
+}
+
+.choice-card-icon {
+    width: 44px !important;
+    height: 44px !important;
+    border-radius: 8px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 1.25rem !important;
+    flex-shrink: 0 !important;
+    transition: all 0.25s ease !important;
+}
+
+.choice-card-content {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+}
+
+.choice-card-title {
+    font-family: 'Outfit', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 0.95rem !important;
+    color: var(--text-primary) !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+}
+
+.choice-card-desc {
+    font-size: 0.8rem !important;
+    color: var(--text-secondary) !important;
+    line-height: 1.4 !important;
+}
+
+.choice-badge {
+    font-size: 0.6rem !important;
+    font-weight: 800 !important;
+    padding: 2px 6px !important;
+    border-radius: 4px !important;
+    letter-spacing: 0.5px !important;
+}
+
+/* Fast/OCR Theme styling */
+.btn-quick .choice-card-icon {
+    background: rgba(245, 158, 11, 0.1) !important;
+    border: 1px solid rgba(245, 158, 11, 0.25) !important;
+    color: #f59e0b !important;
+}
+
+.badge-fast {
+    background: rgba(245, 158, 11, 0.15) !important;
+    color: #fbbf24 !important;
+    border: 1px solid rgba(245, 158, 11, 0.25) !important;
+}
+
+.btn-quick:hover {
+    background: rgba(245, 158, 11, 0.04) !important;
+    border-color: rgba(245, 158, 11, 0.35) !important;
+    box-shadow: 0 4px 20px rgba(245, 158, 11, 0.08) !important;
+    transform: translateY(-2px) !important;
+}
+
+.btn-quick:hover .choice-card-icon {
+    background: rgba(245, 158, 11, 0.2) !important;
+    color: #fbbf24 !important;
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.3) !important;
+}
+
+/* Smart/LLM Theme styling */
+.btn-smart .choice-card-icon {
+    background: rgba(168, 85, 247, 0.1) !important;
+    border: 1px solid rgba(168, 85, 247, 0.25) !important;
+    color: #a855f7 !important;
+}
+
+.badge-smart {
+    background: rgba(168, 85, 247, 0.15) !important;
+    color: #c084fc !important;
+    border: 1px solid rgba(168, 85, 247, 0.25) !important;
+}
+
+.btn-smart:hover {
+    background: rgba(168, 85, 247, 0.04) !important;
+    border-color: rgba(168, 85, 247, 0.35) !important;
+    box-shadow: 0 4px 20px rgba(168, 85, 247, 0.08) !important;
+    transform: translateY(-2px) !important;
+}
+
+.btn-smart:hover .choice-card-icon {
+    background: rgba(168, 85, 247, 0.2) !important;
+    color: #c084fc !important;
+    box-shadow: 0 0 12px rgba(168, 85, 247, 0.3) !important;
+}
+
+#autofill-choice-modal.open {
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+}

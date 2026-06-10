@@ -416,5 +416,5 @@ def ai_data_recovery(raw_ocr_text: str) -> dict:
         return data
     except Exception as e:
         logger.error(f"Failed to parse AI Data Recovery JSON: {str(e)}. Raw response: {response}")
-        return {}
+        raise e
 
