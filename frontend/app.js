@@ -1824,6 +1824,11 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
 
+        // Ensure canonical "name" key is populated from specific name keys
+        if (fields.injured_name) lastExtractedFields["name"] = fields.injured_name;
+        if (fields.deceased_name) lastExtractedFields["name"] = fields.deceased_name;
+        if (fields.claimant_name) lastExtractedFields["name"] = fields.claimant_name;
+
         // Merge raw recovered details if LLM is executed (Part 5 offline store)
         if (rawRecovered) {
             const keyMappings = {

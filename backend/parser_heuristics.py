@@ -829,6 +829,52 @@ def classify_page_type(page_text, page_number):
     return "judgment text"
 
 
+def clean_numeric_to_float_or_int(val, field_name):
+    """
+    Cleans raw strings containing numbers (e.g. 'Rs. 25,000/-', '40%', '28 years')
+    and extracts a clean float or integer so that the browser does not reject
+    them on type="number" inputs.
+    """
+    if val is None or val == "":
+        return ""
+    if isinstance(val, (int, float)):
+        return val
+        
+    val_str = str(val).lower().strip()
+    
+    # 1. Check for Lakh/Lac
+    lakh_match = re.search(r'([\d\.]+)\s*(?:lakhs?|lac|lacs)', val_str)
+    if lakh_match:
+        try:
+            return float(lakh_match.group(1)) * 100000.0
+        except ValueError:
+            pass
+            
+    # 2. Check for Crore
+    crore_match = re.search(r'([\d\.]+)\s*(?:crores?|cr)', val_str)
+    if crore_match:
+        try:
+            return float(crore_match.group(1)) * 10000000.0
+        except ValueError:
+            pass
+
+    # Remove commas
+    val_str = val_str.replace(",", "")
+    
+    # 3. Extract first valid float/int match
+    num_match = re.search(r'\d+\.?\d*', val_str)
+    if num_match:
+        extracted = num_match.group(0)
+        try:
+            if field_name in ["age", "dependents"]:
+                return int(float(extracted))
+            return float(extracted)
+        except ValueError:
+            pass
+            
+    return ""
+
+
 def format_suggestions_for_calculator(suggestions):
     """
     Clean Minimal Legal Calculator-Ready Output Formatter.
@@ -881,19 +927,19 @@ def format_suggestions_for_calculator(suggestions):
             "father_name": get_field_val("father_name", "father_name"),
             "date_of_accident": get_field_val("date_of_accident", "date_of_accident"),
             "date_of_birth": get_field_val("date_of_birth", "date_of_birth"),
-            "age": get_field_val("age", "age"),
+            "age": clean_numeric_to_float_or_int(get_field_val("age", "age"), "age"),
             "marital_status": get_field_val("marital_status", "marital_status", "married"),
-            "monthly_income": get_field_val("monthly_income", "monthly_income"),
-            "future_prospect": get_field_val("future_prospect", "future_prospect"),
+            "monthly_income": clean_numeric_to_float_or_int(get_field_val("monthly_income", "monthly_income"), "monthly_income"),
+            "future_prospect": clean_numeric_to_float_or_int(get_field_val("future_prospect", "future_prospect"), "future_prospect"),
             "place_of_accident": get_field_val("place_of_accident", "place_of_accident"),
             "fir_number": get_field_val("fir_number", "fir_number"),
             "policy_number": get_field_val("policy_number", "policy_number"),
             "vehicle_number": get_field_val("vehicle_number", "vehicle_number"),
             "insurance_company": get_field_val("insurance_company", "insurance_company"),
-            "dependents": get_field_val("dependents", "dependents"),
-            "consortium": get_field_val("consortium", "consortium"),
-            "funeral_expenses": get_field_val("funeral_expenses", "funeral_expenses"),
-            "loss_estate": get_field_val("loss_estate", "loss_estate"),
+            "dependents": clean_numeric_to_float_or_int(get_field_val("dependents", "dependents"), "dependents"),
+            "consortium": clean_numeric_to_float_or_int(get_field_val("consortium", "consortium"), "consortium"),
+            "funeral_expenses": clean_numeric_to_float_or_int(get_field_val("funeral_expenses", "funeral_expenses"), "funeral_expenses"),
+            "loss_estate": clean_numeric_to_float_or_int(get_field_val("loss_estate", "loss_estate"), "loss_estate"),
         }
     else: # injury case
         fields = {
@@ -901,17 +947,17 @@ def format_suggestions_for_calculator(suggestions):
             "father_name": get_field_val("father_name", "father_name"),
             "date_of_accident": get_field_val("date_of_accident", "date_of_accident"),
             "date_of_birth": get_field_val("date_of_birth", "date_of_birth"),
-            "age": get_field_val("age", "age"),
-            "monthly_income": get_field_val("monthly_income", "monthly_income"),
-            "disability": get_field_val("disability", "disability"),
-            "dependents": get_field_val("dependents", "dependents"),
-            "medical_expenses": get_field_val("medical_expenses", "medical_expenses"),
-            "pain_and_suffering": get_field_val("pain_and_suffering", "pain_and_suffering"),
-            "transportation": get_field_val("transportation", "transportation"),
-            "special_diet": get_field_val("special_diet", "special_diet"),
-            "attender_charges": get_field_val("attender_charges", "attender_charges"),
-            "future_medical_expenses": get_field_val("future_medical_expenses", "future_medical_expenses"),
-            "loss_of_income": get_field_val("loss_of_income", "loss_of_income"),
+            "age": clean_numeric_to_float_or_int(get_field_val("age", "age"), "age"),
+            "monthly_income": clean_numeric_to_float_or_int(get_field_val("monthly_income", "monthly_income"), "monthly_income"),
+            "disability": clean_numeric_to_float_or_int(get_field_val("disability", "disability"), "disability"),
+            "dependents": clean_numeric_to_float_or_int(get_field_val("dependents", "dependents"), "dependents"),
+            "medical_expenses": clean_numeric_to_float_or_int(get_field_val("medical_expenses", "medical_expenses"), "medical_expenses"),
+            "pain_and_suffering": clean_numeric_to_float_or_int(get_field_val("pain_and_suffering", "pain_and_suffering"), "pain_and_suffering"),
+            "transportation": clean_numeric_to_float_or_int(get_field_val("transportation", "transportation"), "transportation"),
+            "special_diet": clean_numeric_to_float_or_int(get_field_val("special_diet", "special_diet"), "special_diet"),
+            "attender_charges": clean_numeric_to_float_or_int(get_field_val("attender_charges", "attender_charges"), "attender_charges"),
+            "future_medical_expenses": clean_numeric_to_float_or_int(get_field_val("future_medical_expenses", "future_medical_expenses"), "future_medical_expenses"),
+            "loss_of_income": clean_numeric_to_float_or_int(get_field_val("loss_of_income", "loss_of_income"), "loss_of_income"),
             "fir_number": get_field_val("fir_number", "fir_number"),
             "policy_number": get_field_val("policy_number", "policy_number"),
             "vehicle_number": get_field_val("vehicle_number", "vehicle_number"),
