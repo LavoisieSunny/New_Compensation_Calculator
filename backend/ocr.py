@@ -35,7 +35,7 @@ OCR_PRIMARY_ENGINE = os.getenv("OCR_PRIMARY_ENGINE", "paddle").lower()  # 'paddl
 OCR_RENDER_DPI = int(os.getenv("OCR_RENDER_DPI", "180"))
 OCR_PAGE_TIMEOUT = float(os.getenv("OCR_PAGE_TIMEOUT", "60"))
 OCR_MAX_PAGES_FIRST_PASS = int(os.getenv("OCR_MAX_PAGES_FIRST_PASS", "10"))
-OCR_MAX_PARALLEL_WORKERS = int(os.getenv("OCR_MAX_PARALLEL_WORKERS", "8"))
+OCR_MAX_PARALLEL_WORKERS = int(os.getenv("OCR_MAX_PARALLEL_WORKERS", "5"))
 OCR_RETRY_DPI = int(os.getenv("OCR_RETRY_DPI", "216"))
 DEBUG_OCR = os.getenv("DEBUG_OCR", "false").lower() == "true"
 
