@@ -38,7 +38,7 @@ OCR_PRIMARY_ENGINE = os.getenv("OCR_PRIMARY_ENGINE", "paddle").lower()  # 'paddl
 OCR_RENDER_DPI = int(os.getenv("OCR_RENDER_DPI", "180"))
 OCR_PAGE_TIMEOUT = float(os.getenv("OCR_PAGE_TIMEOUT", "60"))
 OCR_MAX_PAGES_FIRST_PASS = int(os.getenv("OCR_MAX_PAGES_FIRST_PASS", "10"))
-OCR_MAX_PARALLEL_WORKERS = int(os.getenv("OCR_MAX_PARALLEL_WORKERS", "5"))
+OCR_MAX_PARALLEL_WORKERS = int(os.getenv("OCR_MAX_PARALLEL_WORKERS", "3"))
 OCR_RETRY_DPI = int(os.getenv("OCR_RETRY_DPI", "216"))
 DEBUG_OCR = os.getenv("DEBUG_OCR", "false").lower() == "true"
 
@@ -47,6 +47,7 @@ _ocr_lock = threading.Lock()
 _ocr_instance = None
 OCR_INITIALIZED = False
 _paddle_semaphore = threading.Semaphore(1)  # only 1 paddle call at a time
+_paddle_lock = threading.Lock()  # hard mutex for paddle thread safety
 
 # Global Batch Upload and Indexing Process Queue
 BATCH_QUEUE = {}
@@ -748,13 +749,13 @@ def perform_ocr_page_stable(ocr_engine, page_doc, page_idx: int, total_pages: in
                 processed_img.save(temp_img_path)
             
             def run_paddle():
-                with _paddle_semaphore:
+                with _paddle_lock:
                     try:
                         engine = get_ocr_instance()
                         if engine:
                             return engine.ocr(temp_img_path)
                     except Exception as paddle_err:
-                        if "ConvertPirAttribute" in str(paddle_err) or "Unimplemented" in str(paddle_err):
+                        if "ConvertPirAttribute" in str(paddle_err) or "Unimplemented" in str(paddle_err) or "std::exception" in str(paddle_err):
                             logger.warning(f"Page {page_num}: PIR error in sequential → Tesseract")
                             return None
                         else:
@@ -1152,12 +1153,12 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
                             temp_img_path = tmp.name
                             processed_img.save(temp_img_path)
 
-                        with _paddle_semaphore:   # ← serialize paddle calls, threads queue here
+                        with _paddle_lock:   # ← serialize paddle calls, threads queue here
                             try:
                                 instance = get_ocr_instance()
                                 result = instance.ocr(temp_img_path) if instance else None
                             except Exception as paddle_err:
-                                if "ConvertPirAttribute" in str(paddle_err) or "Unimplemented" in str(paddle_err):
+                                if "ConvertPirAttribute" in str(paddle_err) or "Unimplemented" in str(paddle_err) or "std::exception" in str(paddle_err):
                                     logger.warning(f"Page {page_num}: PIR error → Tesseract")
                                     result = None
                                 else:
@@ -1217,12 +1218,12 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, scan_all_
                             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                                 retry_temp = tmp.name
                                 retry_processed.save(retry_temp)
-                            with _paddle_semaphore:
+                            with _paddle_lock:
                                 try:
                                     instance = get_ocr_instance()
                                     retry_result = instance.ocr(retry_temp) if instance else None
                                 except Exception as paddle_err:
-                                    if "ConvertPirAttribute" in str(paddle_err) or "Unimplemented" in str(paddle_err):
+                                    if "ConvertPirAttribute" in str(paddle_err) or "Unimplemented" in str(paddle_err) or "std::exception" in str(paddle_err):
                                         logger.warning(f"Page {page_num}: PIR error in retry")
                                         retry_result = None
                                     else:
@@ -1444,13 +1445,13 @@ def perform_ocr_on_image(file_path: str) -> tuple:
                 processed_img.save(temp_img_path)
             
             def run_paddle():
-                with _paddle_semaphore:
+                with _paddle_lock:
                     try:
                         engine = get_ocr_instance()
                         if engine:
                             return engine.ocr(temp_img_path)
                     except Exception as paddle_err:
-                        if "ConvertPirAttribute" in str(paddle_err) or "Unimplemented" in str(paddle_err):
+                        if "ConvertPirAttribute" in str(paddle_err) or "Unimplemented" in str(paddle_err) or "std::exception" in str(paddle_err):
                             logger.warning("Image OCR: PIR error → Tesseract")
                             return None
                         else:
