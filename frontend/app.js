@@ -844,19 +844,15 @@
 //     }
 // 
 //     function updateLiveCalculations() {
-//         const dobVal = dobInput.value;
-//         const doaVal = doaInput.value;
-// 
-//         const age = calculateAge(dobVal, doaVal);
+//         const age = parseInt(ageInput.value);
 //         const caseType = caseTypeSelect.value;
-// 
-//         if (age !== null) {
-//             ageInput.value = age;
+//         
+//         if (!isNaN(age) && age >= 0) {
 //             if (liveAge) liveAge.textContent = `${age} years`;
-// 
+//             
 //             const mult = getMultiplier(age);
 //             if (liveMultiplier) liveMultiplier.textContent = mult;
-// 
+//             
 //             if (caseType === "death") {
 //                 const futureType = futureTypeSelect ? futureTypeSelect.value : 2;
 //                 const futureProspectInput = document.getElementById("future-prospect");
@@ -869,18 +865,18 @@
 //                 }
 //                 if (liveProspects) liveProspects.textContent = `${prospects}%`;
 //                 if (liveProspectsBar) liveProspectsBar.style.width = `${prospects}%`;
-// 
+//                 
 //                 // Populate only helper parameters
 //                 const deathMultInput = document.getElementById("death-multiplier");
 //                 if (deathMultInput) deathMultInput.value = mult;
-// 
+//                 
 //                 const deps = parseInt(dependentsInput.value) || 0;
 //                 const status = maritalStatusSelect.value || "married";
 //                 const deductionRatio = getDeductionRatio(deps, status);
 //                 const deductionsPercent = Math.round(deductionRatio * 100);
 //                 if (liveDeductions) liveDeductions.textContent = `${deductionsPercent}%`;
 //                 if (liveDeductionsBar) liveDeductionsBar.style.width = `${deductionsPercent}%`;
-// 
+//                 
 //                 const deathDeductInput = document.getElementById("death-deduction");
 //                 if (deathDeductInput) deathDeductInput.value = deductionsPercent;
 // 
@@ -899,59 +895,23 @@
 //                 if (liveDeductionsBar) liveDeductionsBar.style.width = "0%";
 //             }
 //         } else {
-//             // If DOB/DOA not both filled, fall back to whatever is already in the age field
-//             // (could be directly typed or OCR-filled)
-//             const directAge = parseInt(ageInput.value);
-//             if (!isNaN(directAge) && directAge > 0) {
-//                 // Use the directly-provided age for live display and multiplier
-//                 if (liveAge) liveAge.textContent = `${directAge} years`;
-//                 const mult = getMultiplier(directAge);
-//                 if (liveMultiplier) liveMultiplier.textContent = mult;
-//                 if (caseType === "death") {
-//                     const futureType = futureTypeSelect ? futureTypeSelect.value : 2;
-//                     const futureProspectInput = document.getElementById("future-prospect");
-//                     let prospects;
-//                     if (futureProspectInput && futureProspectInput.value !== "" && !isNaN(parseFloat(futureProspectInput.value))) {
-//                         prospects = parseFloat(futureProspectInput.value);
-//                     } else {
-//                         prospects = getFutureProspectPercentage(directAge, futureType);
-//                         if (futureProspectInput) futureProspectInput.value = prospects;
-//                     }
-//                     if (liveProspects) liveProspects.textContent = `${prospects}%`;
-//                     if (liveProspectsBar) liveProspectsBar.style.width = `${prospects}%`;
-//                     const deathMultInput = document.getElementById("death-multiplier");
-//                     if (deathMultInput) deathMultInput.value = mult;
-//                     const deps = parseInt(dependentsInput.value) || 0;
-//                     const status = maritalStatusSelect.value || "married";
-//                     const deductionRatio = getDeductionRatio(deps, status);
-//                     const deductionsPercent = Math.round(deductionRatio * 100);
-//                     if (liveDeductions) liveDeductions.textContent = `${deductionsPercent}%`;
-//                     if (liveDeductionsBar) liveDeductionsBar.style.width = `${deductionsPercent}%`;
-//                     if (document.getElementById("live-calc-multiplier")) document.getElementById("live-calc-multiplier").textContent = mult;
-//                     if (document.getElementById("live-calc-deduct-pct")) document.getElementById("live-calc-deduct-pct").textContent = `${deductionsPercent}%`;
-//                 }
-//             } else {
-//                 // Truly nothing — blank everything
-//                 ageInput.value = "";
-//                 if (liveAge) liveAge.textContent = "—";
-//                 if (liveMultiplier) liveMultiplier.textContent = "—";
-//                 if (liveProspects) liveProspects.textContent = "—%";
-//                 if (liveProspectsBar) liveProspectsBar.style.width = "0%";
-//                 if (liveDeductions) liveDeductions.textContent = "—%";
-//                 if (liveDeductionsBar) liveDeductionsBar.style.width = "0%";
-//                 if (caseType === "death") {
-//                     if (document.getElementById("live-calc-multiplier")) document.getElementById("live-calc-multiplier").textContent = "—";
-//                     if (document.getElementById("live-calc-deduct-pct")) document.getElementById("live-calc-deduct-pct").textContent = "—";
-//                 }
+//             // Truly nothing — blank everything
+//             if (liveAge) liveAge.textContent = "—";
+//             if (liveMultiplier) liveMultiplier.textContent = "—";
+//             if (liveProspects) liveProspects.textContent = "—%";
+//             if (liveProspectsBar) liveProspectsBar.style.width = "0%";
+//             if (liveDeductions) liveDeductions.textContent = "—%";
+//             if (liveDeductionsBar) liveDeductionsBar.style.width = "0%";
+//             if (caseType === "death") {
+//                 if (document.getElementById("live-calc-multiplier")) document.getElementById("live-calc-multiplier").textContent = "—";
+//                 if (document.getElementById("live-calc-deduct-pct")) document.getElementById("live-calc-deduct-pct").textContent = "—";
 //             }
 //         }
 //     }
 // 
 //     const handleRecalculateDefaultProspects = () => {
-//         const dobVal = dobInput.value;
-//         const doaVal = doaInput.value;
-//         const age = calculateAge(dobVal, doaVal);
-//         if (age !== null) {
+//         const age = parseInt(ageInput.value);
+//         if (!isNaN(age) && age >= 0) {
 //             const futureType = futureTypeSelect ? futureTypeSelect.value : 2;
 //             const prospects = getFutureProspectPercentage(age, futureType);
 //             const futureProspectInput = document.getElementById("future-prospect");
@@ -964,12 +924,12 @@
 //         futureTypeSelect.addEventListener("change", handleRecalculateDefaultProspects);
 //     }
 // 
-//     dobInput.addEventListener("change", handleRecalculateDefaultProspects);
-//     doaInput.addEventListener("change", handleRecalculateDefaultProspects);
+//     dobInput.addEventListener("change", updateLiveCalculations);
+//     doaInput.addEventListener("change", updateLiveCalculations);
 //     maritalStatusSelect.addEventListener("change", updateLiveCalculations);
 //     dependentsInput.addEventListener("input", updateLiveCalculations);
 //     monthlyIncomeInput.addEventListener("input", updateLiveCalculations);
-//     ageInput.addEventListener("input", updateLiveCalculations);
+//     ageInput.addEventListener("input", handleRecalculateDefaultProspects);
 // 
 //     // Set dynamic update bindings for new Death Claim inputs and prospects field manual override
 //     setTimeout(() => {
@@ -4026,14 +3986,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function updateLiveCalculations() {
-        const dobVal = dobInput.value;
-        const doaVal = doaInput.value;
-        
-        const age = calculateAge(dobVal, doaVal);
+        const age = parseInt(ageInput.value);
         const caseType = caseTypeSelect.value;
         
-        if (age !== null) {
-            ageInput.value = age;
+        if (!isNaN(age) && age >= 0) {
             if (liveAge) liveAge.textContent = `${age} years`;
             
             const mult = getMultiplier(age);
@@ -4081,59 +4037,23 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (liveDeductionsBar) liveDeductionsBar.style.width = "0%";
             }
         } else {
-            // If DOB/DOA not both filled, fall back to whatever is already in the age field
-            // (could be directly typed or OCR-filled)
-            const directAge = parseInt(ageInput.value);
-            if (!isNaN(directAge) && directAge > 0) {
-                // Use the directly-provided age for live display and multiplier
-                if (liveAge) liveAge.textContent = `${directAge} years`;
-                const mult = getMultiplier(directAge);
-                if (liveMultiplier) liveMultiplier.textContent = mult;
-                if (caseType === "death") {
-                    const futureType = futureTypeSelect ? futureTypeSelect.value : 2;
-                    const futureProspectInput = document.getElementById("future-prospect");
-                    let prospects;
-                    if (futureProspectInput && futureProspectInput.value !== "" && !isNaN(parseFloat(futureProspectInput.value))) {
-                        prospects = parseFloat(futureProspectInput.value);
-                    } else {
-                        prospects = getFutureProspectPercentage(directAge, futureType);
-                        if (futureProspectInput) futureProspectInput.value = prospects;
-                    }
-                    if (liveProspects) liveProspects.textContent = `${prospects}%`;
-                    if (liveProspectsBar) liveProspectsBar.style.width = `${prospects}%`;
-                    const deathMultInput = document.getElementById("death-multiplier");
-                    if (deathMultInput) deathMultInput.value = mult;
-                    const deps = parseInt(dependentsInput.value) || 0;
-                    const status = maritalStatusSelect.value || "married";
-                    const deductionRatio = getDeductionRatio(deps, status);
-                    const deductionsPercent = Math.round(deductionRatio * 100);
-                    if (liveDeductions) liveDeductions.textContent = `${deductionsPercent}%`;
-                    if (liveDeductionsBar) liveDeductionsBar.style.width = `${deductionsPercent}%`;
-                    if (document.getElementById("live-calc-multiplier")) document.getElementById("live-calc-multiplier").textContent = mult;
-                    if (document.getElementById("live-calc-deduct-pct")) document.getElementById("live-calc-deduct-pct").textContent = `${deductionsPercent}%`;
-                }
-            } else {
-                // Truly nothing — blank everything
-                ageInput.value = "";
-                if (liveAge) liveAge.textContent = "—";
-                if (liveMultiplier) liveMultiplier.textContent = "—";
-                if (liveProspects) liveProspects.textContent = "—%";
-                if (liveProspectsBar) liveProspectsBar.style.width = "0%";
-                if (liveDeductions) liveDeductions.textContent = "—%";
-                if (liveDeductionsBar) liveDeductionsBar.style.width = "0%";
-                if (caseType === "death") {
-                    if (document.getElementById("live-calc-multiplier")) document.getElementById("live-calc-multiplier").textContent = "—";
-                    if (document.getElementById("live-calc-deduct-pct")) document.getElementById("live-calc-deduct-pct").textContent = "—";
-                }
+            // Truly nothing — blank everything
+            if (liveAge) liveAge.textContent = "—";
+            if (liveMultiplier) liveMultiplier.textContent = "—";
+            if (liveProspects) liveProspects.textContent = "—%";
+            if (liveProspectsBar) liveProspectsBar.style.width = "0%";
+            if (liveDeductions) liveDeductions.textContent = "—%";
+            if (liveDeductionsBar) liveDeductionsBar.style.width = "0%";
+            if (caseType === "death") {
+                if (document.getElementById("live-calc-multiplier")) document.getElementById("live-calc-multiplier").textContent = "—";
+                if (document.getElementById("live-calc-deduct-pct")) document.getElementById("live-calc-deduct-pct").textContent = "—";
             }
         }
     }
 
     const handleRecalculateDefaultProspects = () => {
-        const dobVal = dobInput.value;
-        const doaVal = doaInput.value;
-        const age = calculateAge(dobVal, doaVal);
-        if (age !== null) {
+        const age = parseInt(ageInput.value);
+        if (!isNaN(age) && age >= 0) {
             const futureType = futureTypeSelect ? futureTypeSelect.value : 2;
             const prospects = getFutureProspectPercentage(age, futureType);
             const futureProspectInput = document.getElementById("future-prospect");
@@ -4146,12 +4066,12 @@ document.addEventListener("DOMContentLoaded", () => {
         futureTypeSelect.addEventListener("change", handleRecalculateDefaultProspects);
     }
 
-    dobInput.addEventListener("change", handleRecalculateDefaultProspects);
-    doaInput.addEventListener("change", handleRecalculateDefaultProspects);
+    dobInput.addEventListener("change", updateLiveCalculations);
+    doaInput.addEventListener("change", updateLiveCalculations);
     maritalStatusSelect.addEventListener("change", updateLiveCalculations);
     dependentsInput.addEventListener("input", updateLiveCalculations);
     monthlyIncomeInput.addEventListener("input", updateLiveCalculations);
-    ageInput.addEventListener("input", updateLiveCalculations);
+    ageInput.addEventListener("input", handleRecalculateDefaultProspects);
     
     // Set dynamic update bindings for new Death Claim inputs and prospects field manual override
     setTimeout(() => {
