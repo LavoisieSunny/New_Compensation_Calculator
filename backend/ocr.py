@@ -18,7 +18,10 @@ from pypdf import PdfReader
 import pypdfium2 as pdfium
 
 # Optimize PaddlePaddle and system memory footprints to prevent OOM process kills on low-RAM VPS servers
-os.environ["FLAGS_allocator_strategy"] = "naive_best_fit"
+os.environ["FLAGS_use_mkldnn"]                       = "0"
+os.environ["FLAGS_enable_pir_in_executor"]            = "0"
+os.environ["FLAGS_pir_apply_shape_optimization_pass"] = "0"
+os.environ["FLAGS_allocator_strategy"]                = "naive_best_fit"
 
 
 from backend.parser_heuristics import parse_extracted_text
