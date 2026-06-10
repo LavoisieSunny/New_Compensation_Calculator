@@ -4103,9 +4103,18 @@ async def ai_recover_fields(request: AIRecoverRequest):
         from backend.llm_client import ai_data_recovery
         full_text = "\n".join(request.raw_text)
         
-        # Invoke LLM parsing
-        recovered_data = ai_data_recovery(full_text)
-        
+        # Invoke LLM parsing (runs in thread to avoid blocking the event loop)
+        recovered_data = await asyncio.to_thread(ai_data_recovery, full_text)
+
+        # Check if ai_data_recovery returned a graceful error fallback
+        if recovered_data.get("ai_recovery_error"):
+            err_msg = recovered_data["ai_recovery_error"]
+            logger.error(f"AI recovery returned error fallback: {err_msg}")
+            raise HTTPException(
+                status_code=503,
+                detail=f"LLM is unavailable or returned an invalid response: {err_msg}"
+            )
+
         # Re-format output compatibility with calculator formatting
         from backend.parser_heuristics import format_suggestions_for_calculator
         formatted = format_suggestions_for_calculator(recovered_data)
@@ -4115,8 +4124,11 @@ async def ai_recover_fields(request: AIRecoverRequest):
             "suggestions": formatted,
             "raw_recovered": recovered_data
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"AI recovery endpoint error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI recovery failed: {str(e)}")
 
 
 class SuggestCaseTypeRequest(BaseModel):

@@ -418,7 +418,11 @@
 #         logger.error(f"Failed to parse AI Data Recovery JSON: {str(e)}. Raw response: {response}")
 #         raise e
 # 
-\n\n\n# backend/llm_client.py\n# backend/llm_client.py
+
+
+
+# backend/llm_client.py
+# backend/llm_client.py
 import json
 import logging
 import urllib.request
@@ -515,7 +519,7 @@ def generate_response(prompt: str, system_instruction: str = None) -> str:
             req_body = json.dumps(payload).encode("utf-8")
 
         req = urllib.request.Request(url, data=req_body, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=120.0) as response:
+        with urllib.request.urlopen(req, timeout=300.0) as response:
             res_body = response.read().decode("utf-8")
             res_json = json.loads(res_body)
             if LLM_PROVIDER == "gemini":

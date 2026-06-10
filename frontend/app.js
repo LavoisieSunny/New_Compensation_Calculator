@@ -5184,7 +5184,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 if (!response.ok) {
                     const errData = await response.json().catch(() => ({}));
-                    throw new Error(errData.detail || "AI recovery API returned error status");
+                    const detail = errData.detail || "";
+                    if (response.status === 503 || detail.toLowerCase().includes("llm") || detail.toLowerCase().includes("unavailable") || detail.toLowerCase().includes("ollama")) {
+                        throw new Error(`LLM server unreachable. Is Ollama running with model ${detail || "qwen2.5:14b"}? Check backend logs.`);
+                    }
+                    throw new Error(detail || `Server error ${response.status}`);
                 }
                 const data = await response.json();
 
