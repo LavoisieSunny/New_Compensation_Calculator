@@ -2296,6 +2296,12 @@
 //             return;
 //         }
 // 
+//         // Before submitting, check if age is missing
+//         const ageVal = parseInt(ageInput.value);
+//         if (!ageVal || ageVal <= 0) {
+//             showToast("⚠️ Age not set — calculation will use default age 30. Upload a PDF or enter DOB + accident date.", "warning");
+//         }
+// 
 //         const payload = {
 //             case_type: caseType,
 //             age: Number(ageInput.value || 0),
@@ -5542,6 +5548,12 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!compensationForm.reportValidity()) {
             showToast("Please fill all mandatory case fields before calculating.", "warning");
             return;
+        }
+
+        // Before submitting, check if age is missing
+        const ageVal = parseInt(ageInput.value);
+        if (!ageVal || ageVal <= 0) {
+            showToast("⚠️ Age not set — calculation will use default age 30. Upload a PDF or enter DOB + accident date.", "warning");
         }
 
         const payload = {
