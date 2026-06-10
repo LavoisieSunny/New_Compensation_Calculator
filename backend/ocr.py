@@ -43,6 +43,7 @@ OCR_RETRY_DPI = int(os.getenv("OCR_RETRY_DPI", "216"))
 DEBUG_OCR = os.getenv("DEBUG_OCR", "false").lower() == "true"
 
 # Global PaddleOCR instance (lazy initialized cached singleton)
+_ocr_lock = threading.Lock()
 _ocr_instance = None
 OCR_INITIALIZED = False
 
@@ -65,24 +66,28 @@ _LEGAL_QUALITY_KEYWORDS = [
 # ======================================================
 
 def get_ocr_instance():
-    """Returns the cached global singleton PaddleOCR instance."""
     global _ocr_instance, OCR_INITIALIZED
-    if _ocr_instance is None:
-        try:
-            logger.info("Initializing PaddleOCR Singleton...")
-            from paddleocr import PaddleOCR
-            _ocr_instance = PaddleOCR(
-                enable_mkldnn=False,
-                use_textline_orientation=True,
-                text_detection_model_name="PP-OCRv5_mobile_det",
-                text_recognition_model_name="en_PP-OCRv5_mobile_rec"
-            )
-            OCR_INITIALIZED = True
-            logger.info("PaddleOCR Singleton successfully loaded!")
-        except Exception as e:
-            logger.error(f"Failed to initialize PaddleOCR Singleton: {str(e)}")
-            _ocr_instance = None
-            OCR_INITIALIZED = False
+    if _ocr_instance is not None:
+        return _ocr_instance
+    with _ocr_lock:
+        if _ocr_instance is None:  # double-checked locking
+            try:
+                logger.info("Initializing PaddleOCR Singleton...")
+                from paddleocr import PaddleOCR
+                _ocr_instance = PaddleOCR(
+                    use_angle_cls=False,
+                    use_gpu=False,
+                    enable_mkldnn=False,
+                    text_detection_model_name="PP-OCRv5_mobile_det",
+                    text_recognition_model_name="en_PP-OCRv5_mobile_rec",
+                    show_log=False,
+                )
+                OCR_INITIALIZED = True
+                logger.info("PaddleOCR Singleton loaded!")
+            except Exception as e:
+                logger.error(f"PaddleOCR init failed: {e}")
+                _ocr_instance = None
+                OCR_INITIALIZED = False
     return _ocr_instance
 
 
