@@ -3175,67 +3175,57 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, page_call
         # ============================================================
         render_dir = tempfile.mkdtemp(prefix="ocr_render_")
         rendered_image_paths = {}  # page_idx -> temp png path
- 
-        # ── PARALLEL RENDER ──────────────────────────────────────────────────
-        # Each render thread opens its OWN pdfium.PdfDocument instance so
-        # there is no shared state — pdfium is safe when each thread has its own doc.
-        # This cuts render time from O(N) sequential to O(N/workers).
-        render_lock = threading.Lock()  # only for writing to rendered_image_paths dict
- 
-        def render_one_page(page_idx):
-            # Skip pages where fitz already has good text
-            if fitz_text_cache and page_idx < len(fitz_text_cache):
-                page_text = fitz_text_cache[page_idx]
-                keywords = ["court", "claimant", "petitioner", "respondent", "accident",
-                           "compensation", "tribunal", "judgment", "deceased", "injured"]
-                hits = sum(1 for kw in keywords if kw in page_text.lower())
-                if len(page_text.strip()) > 200 and hits >= 2:
-                    with render_lock:
-                        rendered_image_paths[page_idx] = None  # use fitz text directly
-                    _tlog(f"[RENDER] Page {page_idx+1}/{total_pages} → PyMuPDF (digital text)")
-                    return
- 
-            try:
-                scale = OCR_RENDER_DPI / 72.0
-                # Each thread opens its own doc handle — no shared state
-                with pdfium.PdfDocument(file_path) as _doc:
-                    page = _doc[page_idx]
-                    bitmap = page.render(scale=scale)
-                    pil_img = bitmap.to_pil()
-                    del bitmap, page
- 
-                pil_img = guard_and_downscale_image(pil_img)
-                img_path = os.path.join(render_dir, f"page_{page_idx:04d}.png")
-                pil_img.save(img_path, format="PNG")
-                del pil_img
- 
-                with render_lock:
-                    rendered_image_paths[page_idx] = img_path
- 
-                done_count = len(rendered_image_paths)
-                _tlog(f"[RENDER] Page {page_idx+1}/{total_pages} → PNG ({done_count}/{total_pages} done)")
-                if page_callback:
-                    page_callback({
-                        "page": page_idx + 1,
-                        "total_pages": total_pages,
-                        "pages_done": done_count,
-                        "engine": "rendering",
-                        "confidence": 0.0, "quality_score": 0.0,
-                        "lines": 0, "ocr_time": 0.0, "total_page_time": 0.0,
-                    })
- 
-            except Exception as e:
-                _tlog(f"[RENDER] Page {page_idx+1} FAILED: {e}")
-                with render_lock:
-                    rendered_image_paths[page_idx] = "error"
- 
+
         try:
-            render_workers = min(OCR_MAX_PARALLEL_WORKERS, total_pages)
-            _tlog(f"[RENDER] Starting parallel render with {render_workers} threads at {OCR_RENDER_DPI} DPI...")
-            with _cf.ThreadPoolExecutor(max_workers=render_workers, thread_name_prefix="ocr_render") as render_pool:
-                list(render_pool.map(render_one_page, range(total_pages)))
+            scale = OCR_RENDER_DPI / 72.0
+            _tlog(f"[RENDER] Rendering {total_pages} pages sequentially at {OCR_RENDER_DPI} DPI...")
+            with pdfium.PdfDocument(file_path) as pdf_doc:
+                for page_idx in range(total_pages):
+                    # Skip pages where fitz already has good text
+                    if fitz_text_cache and page_idx < len(fitz_text_cache):
+                        page_text = fitz_text_cache[page_idx]
+                        keywords = ["court", "claimant", "petitioner", "respondent", "accident",
+                                   "compensation", "tribunal", "judgment", "deceased", "injured"]
+                        hits = sum(1 for kw in keywords if kw in page_text.lower())
+                        if len(page_text.strip()) > 200 and hits >= 2:
+                            rendered_image_paths[page_idx] = None  # Signal: use fitz text directly
+                            _tlog(f"[RENDER] Page {page_idx+1}/{total_pages} → PyMuPDF (digital text)")
+                            continue
+
+                    try:
+                        page = pdf_doc[page_idx]
+                        bitmap = page.render(scale=scale)
+                        pil_img = bitmap.to_pil()
+                        del bitmap, page
+
+                        # Apply memory guard
+                        pil_img = guard_and_downscale_image(pil_img)
+
+                        # Save to temp file
+                        img_path = os.path.join(render_dir, f"page_{page_idx:04d}.png")
+                        pil_img.save(img_path, format="PNG")
+                        rendered_image_paths[page_idx] = img_path
+                        del pil_img
+                        gc.collect()
+
+                        done_count = len(rendered_image_paths)
+                        _tlog(f"[RENDER] Page {page_idx+1}/{total_pages} → PNG ({done_count}/{total_pages} done)")
+                        if page_callback:
+                            page_callback({
+                                "page": page_idx + 1,
+                                "total_pages": total_pages,
+                                "pages_done": done_count,
+                                "engine": "rendering",
+                                "confidence": 0.0, "quality_score": 0.0,
+                                "lines": 0, "ocr_time": 0.0, "total_page_time": 0.0,
+                            })
+
+                    except Exception as e:
+                        _tlog(f"[RENDER] Failed to pre-render page {page_idx+1}: {e}")
+                        rendered_image_paths[page_idx] = "error"
+
         except Exception as e:
-            _tlog(f"[RENDER] Critical failure: {e}")
+            _tlog(f"[RENDER] Critical failure during sequential pre-rendering: {e}")
  
         _tlog(f"[RENDER] Complete: {len(rendered_image_paths)} pages mapped — launching {OCR_MAX_PARALLEL_WORKERS}-worker parallel OCR...")
 
@@ -3445,9 +3435,9 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, page_call
                 }
                 return idx, [], meta
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=OCR_MAX_PARALLEL_WORKERS) as executor:
+        with _cf.ThreadPoolExecutor(max_workers=OCR_MAX_PARALLEL_WORKERS) as executor:
             futures = [executor.submit(process_pre_rendered_page, idx) for idx in range(total_pages)]
-            for future in concurrent.futures.as_completed(futures):
+            for future in _cf.as_completed(futures):
                 idx, page_lines, page_meta = future.result()
                 page_results[idx] = (page_lines, page_meta)
                 if "ocr_time" in page_meta:
