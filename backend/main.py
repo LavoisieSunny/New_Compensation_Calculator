@@ -337,6 +337,37 @@ async def get_qdrant_points():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load database points: {str(e)}")
 
+@app.delete("/api/qdrant/document/{filename:path}")
+async def delete_qdrant_document(filename: str):
+    """
+    Deletes all points associated with a specific filename from the Qdrant database,
+    and removes that file from the BATCH_QUEUE to update the dashboard UI.
+    """
+    try:
+        # 1. Delete points from Qdrant
+        from backend.vector_db import delete_document
+        deleted = delete_document(filename)
+        
+        # 2. Remove from BATCH_QUEUE
+        from backend.ocr import BATCH_QUEUE
+        to_delete = []
+        for file_id, item in BATCH_QUEUE.items():
+            if item.get("filename") == filename:
+                to_delete.append(file_id)
+        
+        for file_id in to_delete:
+            BATCH_QUEUE.pop(file_id, None)
+            
+        return {
+            "success": deleted,
+            "filename": filename,
+            "removed_from_queue": len(to_delete) > 0,
+            "message": f"Successfully deleted document '{filename}' from Qdrant and queue."
+        }
+    except Exception as e:
+        logger.error(f"Error in delete_qdrant_document endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")
+
 
 # ======================================================
 # STATIC FILES SERVING (MAPPED TO THE TABBED SPA)

@@ -509,3 +509,31 @@ def semantic_search_rag(query: str, limit: int = 5, filename_filter: str = None)
     """
     logger.info(f"RAG search query='{query}', limit={limit}, filename_filter='{filename_filter}'")
     return semantic_search(query, limit=limit, filename_filter=filename_filter)
+
+def delete_document(filename: str) -> bool:
+    """
+    Deletes all points associated with the given filename from the Qdrant collection.
+    """
+    client = get_qdrant_client()
+    if client is None:
+        logger.warning("Vector DB is offline. Skipping deletion.")
+        return False
+    try:
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        logger.info(f"Deleting points for document '{filename}' from collection '{COLLECTION_NAME}'...")
+        client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=Filter(
+                must=[
+                    FieldCondition(
+                        key="filename",
+                        match=MatchValue(value=filename)
+                    )
+                ]
+            )
+        )
+        logger.info(f"Points for document '{filename}' deleted successfully!")
+        return True
+    except Exception as e:
+        logger.error(f"Error deleting document '{filename}' from Qdrant: {str(e)}")
+        return False

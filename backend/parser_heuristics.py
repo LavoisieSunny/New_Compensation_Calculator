@@ -1623,6 +1623,10 @@ def parse_extracted_text(text_lines):
     section priority rules, entity contamination filters, page importance/citation suppression,
     chronological parsing, compensation table extraction, and detailed confidence tracking.
     """
+    print("[PARSE DEBUG] First 60 lines of raw text:")
+    for i, line in enumerate(text_lines[:60]):
+        print(f"  Line {i+1:>2}: {line.strip()}")
+
     # 1. Segment text_lines into pages
     pages = []
     current_page_num = 1
@@ -3265,5 +3269,13 @@ def parse_extracted_text(text_lines):
     for p in pages:
         page_classifications[str(p["page_number"])] = classify_page_type(p["text"], p["page_number"])
     parser_debug["page_classifications"] = page_classifications
+
+    print("[PARSE DEBUG] Final parsed key fields:")
+    print(f"  Name: {suggestions.get('name')}")
+    print(f"  Case Type: {suggestions.get('case_type')}")
+    print(f"  Age: {suggestions.get('age')}")
+    print(f"  Monthly Income: {suggestions.get('monthly_income')}")
+    print(f"  Award Amount: {suggestions.get('award_amount')}")
+    print(f"  Disability: {suggestions.get('disability')}")
 
     return suggestions

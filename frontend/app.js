@@ -3743,9 +3743,12 @@ document.addEventListener("DOMContentLoaded", () => {
                     <td style="padding: 12px 16px; font-weight: 500;">${filename}</td>
                     <td style="padding: 12px 16px; text-align: center;"><span class="badge tech-badge" style="padding: 2px 6px;"># ${chunkId}</span></td>
                     <td style="padding: 12px 16px; color: var(--text-secondary); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">"${text}"</td>
-                    <td style="padding: 12px 16px; text-align: right;">
+                    <td style="padding: 12px 16px; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
                         <button type="button" class="btn btn-secondary btn-small view-payload-btn" data-point-id="${point.id}">
                             <i class="fa-solid fa-code"></i> Payload
+                        </button>
+                        <button type="button" class="btn btn-danger btn-small remove-doc-btn" data-filename="${filename.replace(/"/g, '&quot;')}">
+                            <i class="fa-solid fa-trash"></i> Remove
                         </button>
                     </td>
                 `;
@@ -3757,6 +3760,49 @@ document.addEventListener("DOMContentLoaded", () => {
                         payloadModal.classList.add("open");
                     }
                 });
+
+                // Bind remove document button
+                const removeBtn = tr.querySelector(".remove-doc-btn");
+                if (removeBtn) {
+                    removeBtn.addEventListener("click", async () => {
+                        const fname = removeBtn.getAttribute("data-filename");
+                        if (!confirm(`Are you sure you want to permanently delete document "${fname}" and all its vector chunks from the Qdrant database?`)) {
+                            return;
+                        }
+                        
+                        try {
+                            showToast(`Deleting document "${fname}"...`, "info");
+                            const delResponse = await fetch(`/api/qdrant/document/${encodeURIComponent(fname)}`, {
+                                method: "DELETE"
+                            });
+                            
+                            if (!delResponse.ok) {
+                                throw new Error(`HTTP error ${delResponse.status}`);
+                            }
+                            
+                            const delData = await delResponse.json();
+                            if (delData.success) {
+                                showToast(`Successfully removed "${fname}" from database.`, "success");
+                                
+                                // Remove file from in-memory fileQueue
+                                fileQueue = fileQueue.filter(f => f.filename !== fname);
+                                if (typeof renderQueueList === "function") {
+                                    renderQueueList();
+                                }
+                                
+                                // Refresh the points view
+                                if (typeof loadQdrantDashboard === "function") {
+                                    await loadQdrantDashboard();
+                                }
+                            } else {
+                                throw new Error(delData.message || "Failed to delete from database");
+                            }
+                        } catch (err) {
+                            console.error("Delete document error:", err);
+                            showToast(`Failed to delete document: ${err.message}`, "error");
+                        }
+                    });
+                }
 
                 qdrantPointsTableBody.appendChild(tr);
             });

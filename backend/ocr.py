@@ -3380,16 +3380,16 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, page_call
                             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                                 retry_temp = tmp.name
                                 retry_processed.save(retry_temp)
-                            with _paddle_lock:
+                            def _run_paddle_retry(path, pnum):
                                 try:
                                     instance = get_ocr_instance()
-                                    retry_result = instance.ocr(retry_temp) if instance else None
+                                    return instance.ocr(path) if instance else None
                                 except Exception as paddle_err:
                                     if "ConvertPirAttribute" in str(paddle_err) or "Unimplemented" in str(paddle_err) or "std::exception" in str(paddle_err):
-                                        logger.warning(f"Page {page_num}: PIR error in retry")
-                                        retry_result = None
-                                    else:
-                                        raise
+                                        _tlog(f"[PAGE {pnum:>3}] PIR error in retry → skip")
+                                        return None
+                                    raise
+                            retry_result = _paddle_executor.submit(_run_paddle_retry, retry_temp, page_num).result()
                             if retry_result:
                                 retry_lines = extract_text_lines_from_paddle_result(retry_result)
                                 retry_conf = calculate_paddle_confidence(retry_result)
