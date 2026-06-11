@@ -2102,6 +2102,7 @@
  
 import os
 import re
+import sys
 import gc
 import time
 import shutil
@@ -2137,9 +2138,12 @@ logger.setLevel(logging.INFO)
 logger.propagate = True
  
 def _tlog(msg: str):
-    """Terminal-safe logger: always prints to stdout AND sends to logger.
-    Guarantees visibility in uvicorn terminal regardless of log handler config."""
-    print(f"[OCR] {msg}", flush=True)
+    """Terminal-safe logger: writes to stdout, stderr, AND logger.
+    Triple-writes so it's impossible to suppress regardless of uvicorn log config,
+    nohup, screen, or any other wrapping."""
+    line = f"[OCR] {msg}"
+    print(line, flush=True)           # stdout
+    print(line, flush=True, file=sys.stderr)  # stderr (uvicorn always shows this)
     logger.info(msg)
  
 router = APIRouter()
@@ -2191,7 +2195,7 @@ def get_ocr_instance():
     with _ocr_lock:
         if _ocr_instance is None:  # double-checked locking
             try:
-                logger.info("Initializing PaddleOCR Singleton...")
+                _tlog("Initializing PaddleOCR Singleton...")
                 from paddleocr import PaddleOCR
                 _ocr_instance = PaddleOCR(
                     use_textline_orientation=True,
@@ -2199,7 +2203,7 @@ def get_ocr_instance():
                     text_recognition_model_name="en_PP-OCRv5_mobile_rec",
                 )
                 OCR_INITIALIZED = True
-                logger.info("PaddleOCR Singleton loaded!")
+                _tlog("PaddleOCR Singleton loaded! ✓")
             except Exception as e:
                 logger.error(f"PaddleOCR init failed: {e}")
                 _ocr_instance = None
@@ -2648,6 +2652,31 @@ def is_tesseract_available() -> bool:
     return _TESSERACT_AVAILABLE
  
  
+# ── cached Tesseract language selection ──────────────────────────────────────
+_tesseract_lang_cache: str = None
+ 
+def _get_tesseract_lang() -> str:
+    """Returns 'eng+hin' if hin tessdata is available, otherwise 'eng'.
+    Result is cached after first call so we never probe twice."""
+    global _tesseract_lang_cache
+    if _tesseract_lang_cache is not None:
+        return _tesseract_lang_cache
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["tesseract", "--list-langs"],
+            capture_output=True, text=True, timeout=5
+        )
+        if "hin" in result.stdout or "hin" in result.stderr:
+            _tesseract_lang_cache = "eng+hin"
+        else:
+            _tesseract_lang_cache = "eng"
+    except Exception:
+        _tesseract_lang_cache = "eng"
+    _tlog(f"[INIT] Tesseract lang selected: {_tesseract_lang_cache}")
+    return _tesseract_lang_cache
+ 
+ 
 def run_tesseract_fallback(pil_img, extract_boxes=False) -> tuple:
     """
     Lightweight fallback OCR using Tesseract (pytesseract).
@@ -2666,12 +2695,10 @@ def run_tesseract_fallback(pil_img, extract_boxes=False) -> tuple:
             temp_path = temp_file.name
             pil_img.save(temp_path)
             
-        try:
-            text_str = pytesseract.image_to_string(temp_path, lang="eng+hin", config="--oem 1 --psm 6")
-            config_lang = "eng+hin"
-        except Exception:
-            text_str = pytesseract.image_to_string(temp_path, lang="eng", config="--oem 1 --psm 6")
-            config_lang = "eng"
+        # Use a cached lang string — check hin availability once at init, not per call
+        _tess_lang = _get_tesseract_lang()
+        text_str = pytesseract.image_to_string(temp_path, lang=_tess_lang, config="--oem 1 --psm 6")
+        config_lang = _tess_lang
             
         text_lines = [line.strip() for line in text_str.split("\n") if line.strip()]
         
@@ -3103,15 +3130,18 @@ def generate_searchable_pdf(file_path: str, page_details: list, original_filenam
 def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, page_callback=None, scan_all_pages: bool = False, original_filename: str = None) -> tuple:
     start_time = time.time()
     ocr_engine = get_ocr_instance()
-
-    if ocr_engine is None:
-        logger.warning("PaddleOCR offline. Returning empty result.")
-        return [], _build_ocr_debug(
-            engine_used="unavailable", retry_count=0, quality_score=0.0,
-            failed_pages=[], successful_pages=[], preprocessing_applied=[],
-            fallback_ocr_engine="none", text_density_score=0.0,
-            total_ocr_time=time.time() - start_time
-        )
+    paddle_available = ocr_engine is not None
+ 
+    if not paddle_available:
+        _tlog("[OCR] PaddleOCR unavailable — continuing in Tesseract-only mode (parallel).")
+        if not is_tesseract_available():
+            _tlog("[OCR] Tesseract also unavailable. No OCR engines found.")
+            return [], _build_ocr_debug(
+                engine_used="unavailable", retry_count=0, quality_score=0.0,
+                failed_pages=[], successful_pages=[], preprocessing_applied=[],
+                fallback_ocr_engine="none", text_density_score=0.0,
+                total_ocr_time=time.time() - start_time
+            )
 
     try:
         # Pre-cache fitz text
@@ -3142,49 +3172,70 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, page_call
 
         # ============================================================
         # CRITICAL FIX: Pre-render ALL pages to temp PNG files
-        # sequentially using a SINGLE open pdfium doc.
-        # This prevents concurrent pdfium doc opens that cause
-        # "Data format error" on large PDFs (>80 pages).
         # ============================================================
         render_dir = tempfile.mkdtemp(prefix="ocr_render_")
         rendered_image_paths = {}  # page_idx -> temp png path
-
+ 
+        # ── PARALLEL RENDER ──────────────────────────────────────────────────
+        # Each render thread opens its OWN pdfium.PdfDocument instance so
+        # there is no shared state — pdfium is safe when each thread has its own doc.
+        # This cuts render time from O(N) sequential to O(N/workers).
+        render_lock = threading.Lock()  # only for writing to rendered_image_paths dict
+ 
+        def render_one_page(page_idx):
+            # Skip pages where fitz already has good text
+            if fitz_text_cache and page_idx < len(fitz_text_cache):
+                page_text = fitz_text_cache[page_idx]
+                keywords = ["court", "claimant", "petitioner", "respondent", "accident",
+                           "compensation", "tribunal", "judgment", "deceased", "injured"]
+                hits = sum(1 for kw in keywords if kw in page_text.lower())
+                if len(page_text.strip()) > 200 and hits >= 2:
+                    with render_lock:
+                        rendered_image_paths[page_idx] = None  # use fitz text directly
+                    _tlog(f"[RENDER] Page {page_idx+1}/{total_pages} → PyMuPDF (digital text)")
+                    return
+ 
+            try:
+                scale = OCR_RENDER_DPI / 72.0
+                # Each thread opens its own doc handle — no shared state
+                with pdfium.PdfDocument(file_path) as _doc:
+                    page = _doc[page_idx]
+                    bitmap = page.render(scale=scale)
+                    pil_img = bitmap.to_pil()
+                    del bitmap, page
+ 
+                pil_img = guard_and_downscale_image(pil_img)
+                img_path = os.path.join(render_dir, f"page_{page_idx:04d}.png")
+                pil_img.save(img_path, format="PNG")
+                del pil_img
+ 
+                with render_lock:
+                    rendered_image_paths[page_idx] = img_path
+ 
+                done_count = len(rendered_image_paths)
+                _tlog(f"[RENDER] Page {page_idx+1}/{total_pages} → PNG ({done_count}/{total_pages} done)")
+                if page_callback:
+                    page_callback({
+                        "page": page_idx + 1,
+                        "total_pages": total_pages,
+                        "pages_done": done_count,
+                        "engine": "rendering",
+                        "confidence": 0.0, "quality_score": 0.0,
+                        "lines": 0, "ocr_time": 0.0, "total_page_time": 0.0,
+                    })
+ 
+            except Exception as e:
+                _tlog(f"[RENDER] Page {page_idx+1} FAILED: {e}")
+                with render_lock:
+                    rendered_image_paths[page_idx] = "error"
+ 
         try:
-            scale = OCR_RENDER_DPI / 72.0
-            with pdfium.PdfDocument(file_path) as pdf_doc:
-                for page_idx in range(total_pages):
-                    # Skip pages where fitz already has good text
-                    if fitz_text_cache and page_idx < len(fitz_text_cache):
-                        page_text = fitz_text_cache[page_idx]
-                        keywords = ["court", "claimant", "petitioner", "respondent", "accident",
-                                   "compensation", "tribunal", "judgment", "deceased", "injured"]
-                        hits = sum(1 for kw in keywords if kw in page_text.lower())
-                        if len(page_text.strip()) > 200 and hits >= 2:
-                            rendered_image_paths[page_idx] = None  # Signal: use fitz text directly
-                            continue
- 
-                    try:
-                        page = pdf_doc[page_idx]
-                        bitmap = page.render(scale=scale)
-                        pil_img = bitmap.to_pil()
-                        del bitmap, page
- 
-                        # Apply memory guard
-                        pil_img = guard_and_downscale_image(pil_img)
- 
-                        # Save to temp file
-                        img_path = os.path.join(render_dir, f"page_{page_idx:04d}.png")
-                        pil_img.save(img_path, format="PNG")
-                        rendered_image_paths[page_idx] = img_path
-                        del pil_img
-                        gc.collect()
-
-                    except Exception as e:
-                        logger.error(f"Failed to pre-render page {page_idx+1}: {e}")
-                        rendered_image_paths[page_idx] = "error"
- 
+            render_workers = min(OCR_MAX_PARALLEL_WORKERS, total_pages)
+            _tlog(f"[RENDER] Starting parallel render with {render_workers} threads at {OCR_RENDER_DPI} DPI...")
+            with _cf.ThreadPoolExecutor(max_workers=render_workers, thread_name_prefix="ocr_render") as render_pool:
+                list(render_pool.map(render_one_page, range(total_pages)))
         except Exception as e:
-            logger.error(f"Critical failure during sequential pre-rendering: {e}")
+            _tlog(f"[RENDER] Critical failure: {e}")
  
         _tlog(f"[RENDER] Complete: {len(rendered_image_paths)} pages mapped — launching {OCR_MAX_PARALLEL_WORKERS}-worker parallel OCR...")
 
@@ -3256,12 +3307,16 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, page_call
                 ocr_boxes = []
                 engine_used = ""
 
-                if classification == "low-content":
-                    _tlog(f"[PAGE {page_num:>3}/{total_pages}] Low-content page — routing directly to Tesseract")
+                if classification == "low-content" or not paddle_available:
+                    if not paddle_available:
+                        _tlog(f"[PAGE {page_num:>3}/{total_pages}] Tesseract-only mode (Paddle unavailable)")
+                    else:
+                        _tlog(f"[PAGE {page_num:>3}/{total_pages}] Low-content page — routing directly to Tesseract")
                     lines, conf, ocr_boxes = run_tesseract_fallback(processed_img, extract_boxes=False)
                     engine_used = "Tesseract"
                 else:
-                    # PaddleOCR via temp file — serialized
+                    # PaddleOCR via dedicated single-thread executor
+                    # This thread does render+preprocess in parallel; only the .ocr() call serialises
                     temp_img_path = None
                     paddle_success = False
                     try:
@@ -3279,7 +3334,6 @@ def perform_ocr_on_scanned_pdf(file_path: str, progress_callback=None, page_call
                                     return None
                                 raise
                         # Submit to dedicated single-thread Paddle executor
-                        # so this worker thread is NOT blocked — just waiting on Future
                         result = _paddle_executor.submit(_run_paddle_ocr, temp_img_path, page_num).result()
 
                         if result:
