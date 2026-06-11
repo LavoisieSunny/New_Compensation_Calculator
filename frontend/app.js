@@ -3140,6 +3140,7 @@
 // });
 
 
+
 /* ==========================================================================
    COMPENSATION CALCULATOR WORKSTATION - FRONTEND DASHBOARD ENGINE
    ========================================================================== */
@@ -5015,6 +5016,30 @@ document.addEventListener("DOMContentLoaded", () => {
         
         Object.keys(fields).forEach(key => {
             lastExtractedFields[key] = fields[key];
+        });
+
+        // ── Alias normalisation: map LLM/heuristic field name variants to
+        //    the canonical keys that injuryMapping/deathMapping expect ──────
+        const fieldAliases = {
+            "disability_percentage":   "disability",
+            "permanent_disability":    "disability",
+            "accident_date":           "date_of_accident",
+            "dob":                     "date_of_birth",
+            "accident_place":          "place_of_accident",
+            "loss_of_consortium":      "consortium",
+            "loss_of_estate":          "loss_estate",
+            "loss_estate":             "loss_estate",
+            "funeral":                 "funeral_expenses",
+            "claimant_name":           "name",
+            "injured_name":            "name",
+            "deceased_name":           "name",
+        };
+        Object.keys(fieldAliases).forEach(src => {
+            const dst = fieldAliases[src];
+            if ((fields[src] !== undefined && fields[src] !== null && fields[src] !== "") &&
+                (lastExtractedFields[dst] === undefined || lastExtractedFields[dst] === null || lastExtractedFields[dst] === "")) {
+                lastExtractedFields[dst] = fields[src];
+            }
         });
 
         ["date_of_birth", "date_of_accident"].forEach(key => {

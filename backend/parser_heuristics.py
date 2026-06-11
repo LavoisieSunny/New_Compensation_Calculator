@@ -120,6 +120,51 @@ FIELD_LABEL_ALIASES = {
         "no. of dependents", "number of dependents", "dependents",
         "no of dependants", "no. of dependants", "number of dependants",
         "total dependents"
+    ],
+    "permanent_disability": [
+        "permanent disability", "disability percentage", "permanent disability percentage",
+        "degree of disability", "extent of disability", "permanent partial disability",
+        "partial permanent disability", "percentage of disability", "disability %",
+        "disability percent", "permanent disablement", "degree of permanent disability",
+        "functional disability", "physical disability"
+    ],
+    "medical_expenses": [
+        "medical expenses", "medical exp", "medical bills", "hospital expenses",
+        "hospital bills", "treatment expenses", "treatment cost", "medical cost",
+        "hospitalisation expenses", "hospitalisation charges", "medical expenditure",
+        "medical charges", "total medical expenses"
+    ],
+    "future_medical_expenses": [
+        "future medical expenses", "future medical", "future treatment expenses",
+        "future medical cost", "future medical charges", "future hospitalisation"
+    ],
+    "pain_and_suffering": [
+        "pain and suffering", "pain & suffering", "pain and agony",
+        "pain suffering and mental agony", "physical pain", "mental agony",
+        "pain and mental agony", "pain agony and suffering",
+        "physical and mental pain", "suffering"
+    ],
+    "transportation": [
+        "transportation", "transport charges", "conveyance charges",
+        "travelling expenses", "travel expenses", "conveyance",
+        "transport expenses", "travelling charges"
+    ],
+    "special_diet": [
+        "special diet", "special nourishment", "nutritious diet",
+        "extra nourishment", "diet charges", "nourishment charges",
+        "nutritional expenses", "diet expenses", "food expenses"
+    ],
+    "attender_charges": [
+        "attender charges", "attendant charges", "nursing charges",
+        "nursing expenses", "attender fee", "attendant fee",
+        "caretaker charges", "care taker charges", "attendant expenses",
+        "nursing care charges", "attender"
+    ],
+    "loss_of_income": [
+        "loss of income", "loss of income during treatment",
+        "loss of earning", "loss of wages", "loss of salary",
+        "loss of employment income", "income loss during treatment",
+        "loss of pay", "loss of work income", "loss of earnings"
     ]
 }
 
@@ -2908,20 +2953,47 @@ def parse_extracted_text(text_lines):
     extracted_loveaff = get_table_value(["love and affection", "love & affection"])
     extracted_lossofenjoy = get_table_value(["enjoyment of life", "loss of enjoyment"])
 
-    extracted_future_medical = get_table_value(["future medical"])
+    extracted_future_medical = get_table_value([
+        "future medical", "future treatment", "future medical expenses",
+        "future medical cost", "future medical exp"
+    ])
     extracted_medical = None
     for t_key, t_val in compensation_table.items():
         if "medical" in t_key.lower() and "future" not in t_key.lower():
             extracted_medical = t_val
             break
     if not extracted_medical:
-        extracted_medical = get_table_value(["medical"])
-        
-    extracted_pain = get_table_value(["pain"])
-    extracted_transport = get_table_value(["transport"])
-    extracted_diet = get_table_value(["nourishment", "diet"])
-    extracted_attender = get_table_value(["attender", "attendant"])
-    extracted_loss_income = get_table_value(["loss of income", "loss of earning", "earning"])
+        extracted_medical = get_table_value([
+            "medical expenses", "medical exp", "medical bill", "medical cost",
+            "hospital expenses", "hospital bill", "treatment expenses",
+            "treatment cost", "medical", "hospitalisation"
+        ])
+
+    extracted_pain = get_table_value([
+        "pain and suffering", "pain & suffering", "pain and agony",
+        "pain, suffering", "physical pain", "mental agony",
+        "pain and mental agony", "pain"
+    ])
+    extracted_transport = get_table_value([
+        "transport", "transportation", "conveyance", "travelling",
+        "travel expenses", "travel charges", "conveyance charges"
+    ])
+    extracted_diet = get_table_value([
+        "nourishment", "diet", "special diet", "nutritious diet",
+        "extra nourishment", "nutritional", "food expenses",
+        "special food", "diet charges"
+    ])
+    extracted_attender = get_table_value([
+        "attender", "attendant", "nursing", "nursing charges",
+        "attendant charges", "attender charges", "nursing expenses",
+        "care taker", "caretaker", "attendant fee"
+    ])
+    extracted_loss_income = get_table_value([
+        "loss of income", "loss of earning", "loss of wages",
+        "loss of salary", "loss of employment", "income loss",
+        "earning capacity loss", "loss of work", "loss of earning capacity",
+        "earning", "loss of income during", "loss of pay"
+    ])
 
     suggestions = {
         "case_type": case_type,
