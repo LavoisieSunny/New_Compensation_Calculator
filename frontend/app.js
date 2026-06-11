@@ -3146,12 +3146,12 @@
    ========================================================================== */
 
 // Global Error Handler to shield against silent crashes (Task 19)
-window.onerror = function(msg, src, line, col, err) {
+window.onerror = function (msg, src, line, col, err) {
     console.error("GLOBAL ERROR DETECTED:", msg, "at", src, "line:", line, err);
 };
 
 document.addEventListener("DOMContentLoaded", () => {
-    
+
     // --- STATE VARIABLES ---
     let activeTab = "calculator";
     let fileQueue = []; // Local file tracker
@@ -3159,7 +3159,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let isPolling = false;
     let currentCalculationAmount = 0;
     let currentOcrRawText = []; // Recover raw text from the last successful single OCR
-    
+
     // Global Cache for Extracted Field Population (Part 5)
     let lastExtractedFields = {};
     let lastExtractedConfidences = {};
@@ -3179,15 +3179,15 @@ document.addEventListener("DOMContentLoaded", () => {
             clearInterval(ocrTimerInterval);
         }
         ocrSecondsElapsed = 0;
-        
+
         const timerContainer = document.getElementById("ocr-timer-container");
         const statusIcon = document.getElementById("ocr-timer-status-icon");
         const statusText = document.getElementById("ocr-timer-status-text");
         const elapsedText = document.getElementById("ocr-timer-elapsed");
-        
+
         const headerTimerContainer = document.getElementById("header-ocr-timer-badge");
         const headerElapsedText = document.getElementById("header-ocr-timer-elapsed");
-        
+
         if (timerContainer) {
             timerContainer.classList.remove("hidden-section");
             timerContainer.style.display = "flex";
@@ -3203,7 +3203,7 @@ document.addEventListener("DOMContentLoaded", () => {
             elapsedText.textContent = "00:00";
             elapsedText.style.color = "var(--color-primary)";
         }
-        
+
         if (headerTimerContainer) {
             headerTimerContainer.classList.remove("hidden-section");
             headerTimerContainer.style.display = "inline-flex";
@@ -3214,7 +3214,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (headerElapsedText) {
             headerElapsedText.textContent = "00:00";
         }
-        
+
         ocrTimerInterval = setInterval(() => {
             ocrSecondsElapsed++;
             const formattedTime = formatTimeMMSS(ocrSecondsElapsed);
@@ -3239,10 +3239,10 @@ document.addEventListener("DOMContentLoaded", () => {
         const statusIcon = document.getElementById("ocr-timer-status-icon");
         const statusText = document.getElementById("ocr-timer-status-text");
         const elapsedText = document.getElementById("ocr-timer-elapsed");
-        
+
         const headerTimerContainer = document.getElementById("header-ocr-timer-badge");
         const headerElapsedText = document.getElementById("header-ocr-timer-elapsed");
-        
+
         if (statusIcon) {
             statusIcon.innerHTML = `<i class="fa-solid fa-circle-check" style="color: var(--color-success);"></i>`;
         }
@@ -3254,7 +3254,7 @@ document.addEventListener("DOMContentLoaded", () => {
             elapsedText.textContent = `Total Time: ${formatTimeMMSS(ocrSecondsElapsed)}`;
             elapsedText.style.color = "var(--color-success)";
         }
-        
+
         if (headerElapsedText && headerTimerContainer) {
             headerElapsedText.textContent = `✅ Complete: ${formatTimeMMSS(ocrSecondsElapsed)}`;
             headerTimerContainer.style.color = "var(--color-success)";
@@ -3271,10 +3271,10 @@ document.addEventListener("DOMContentLoaded", () => {
         const statusIcon = document.getElementById("ocr-timer-status-icon");
         const statusText = document.getElementById("ocr-timer-status-text");
         const elapsedText = document.getElementById("ocr-timer-elapsed");
-        
+
         const headerTimerContainer = document.getElementById("header-ocr-timer-badge");
         const headerElapsedText = document.getElementById("header-ocr-timer-elapsed");
-        
+
         if (statusIcon) {
             statusIcon.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color: var(--color-danger);"></i>`;
         }
@@ -3286,7 +3286,7 @@ document.addEventListener("DOMContentLoaded", () => {
             elapsedText.textContent = `OCR Failed after ${formatTimeMMSS(ocrSecondsElapsed)}`;
             elapsedText.style.color = "var(--color-danger)";
         }
-        
+
         if (headerElapsedText && headerTimerContainer) {
             headerElapsedText.textContent = `❌ Failed: ${formatTimeMMSS(ocrSecondsElapsed)}`;
             headerTimerContainer.style.color = "var(--color-danger)";
@@ -3385,16 +3385,16 @@ document.addEventListener("DOMContentLoaded", () => {
     async function checkCaseType(selectedType, rawText) {
         const container = document.getElementById("case-type-suggestion");
         if (!container) return;
-        
+
         if (!rawText || !rawText.trim()) {
             container.innerHTML = "";
             container.classList.add("hidden-section");
             return;
         }
-        
+
         container.classList.remove("hidden-section");
         container.innerHTML = `<div class="suggestion-loading">Analyzing case type...</div>`;
-        
+
         try {
             const response = await fetch("/api/ocr/suggest-case-type", {
                 method: "POST",
@@ -3406,29 +3406,29 @@ document.addEventListener("DOMContentLoaded", () => {
                     selected_case_type: selectedType
                 })
             });
-            
+
             if (!response.ok) {
                 throw new Error("Failed to fetch case type suggestions");
             }
-            
+
             const data = await response.json();
             const suggestions = data.suggestions || [];
-            
+
             if (suggestions.length === 0) {
                 container.innerHTML = "";
                 container.classList.add("hidden-section");
                 return;
             }
-            
+
             // First item is the top prediction (since it is sorted descending by the backend)
             const topPrediction = suggestions[0];
             const topCategory = topPrediction.case_type;
             const topConfidence = topPrediction.confidence;
-            
+
             const topIsDeath = (topCategory === "Death");
             const selectedIsDeath = (selectedType === "death");
             const isMismatch = (topConfidence > 0.50) && (topIsDeath !== selectedIsDeath);
-            
+
             let warningHtml = "";
             if (isMismatch) {
                 warningHtml = `
@@ -3438,14 +3438,14 @@ document.addEventListener("DOMContentLoaded", () => {
                     </div>
                 `;
             }
-            
+
             let barsHtml = '<div class="case-type-bars">';
             suggestions.forEach(item => {
                 const isDeathItem = (item.case_type === "Death");
                 const isSelectedCategory = (isDeathItem && selectedIsDeath) || (!isDeathItem && !selectedIsDeath);
                 const confidencePct = Math.round(item.confidence * 100);
                 const selectedClass = isSelectedCategory ? "selected" : "";
-                
+
                 barsHtml += `
                     <div class="case-bar-row ${selectedClass}">
                         <span class="case-label" title="${item.case_type}">${item.case_type}</span>
@@ -3457,9 +3457,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 `;
             });
             barsHtml += '</div>';
-            
+
             container.innerHTML = warningHtml + barsHtml;
-            
+
         } catch (error) {
             console.error("Error checking case type:", error);
             container.innerHTML = "";
@@ -3475,7 +3475,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const statusDot = document.querySelector(".status-dot");
     const serverStatus = document.getElementById("server-status");
     const pulseIndicator = document.querySelector(".pulse-indicator");
-    
+
     // TAB 1: CALCULATOR WORKSPACE
     const caseTypeSelect = document.getElementById("case-type");
     const sharedFields = document.getElementById("shared-fields");
@@ -3483,7 +3483,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const injuryFields = document.getElementById("injury-fields");
     const formActionsBar = document.getElementById("form-actions-bar");
     const compensationForm = document.getElementById("compensation-form");
-    
+
     // Single Case PDF Upload & Preview
     const singleUploadSection = document.getElementById("single-upload-section");
     const singleDropZone = document.getElementById("single-drop-zone");
@@ -3492,12 +3492,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const singlePreviewContainer = document.getElementById("single-preview-container");
     const singlePreviewFilename = document.getElementById("single-preview-filename");
     const aiExtractBtn = document.getElementById("ai-extract-btn");
-    
+
     // Age & Dates
     const dobInput = document.getElementById("date-of-birth");
     const doaInput = document.getElementById("date-of-accident");
     const ageInput = document.getElementById("age");
-    
+
     // Live previews
     const liveMetricsCard = document.getElementById("live-metrics-card");
     const liveAge = document.getElementById("live-age");
@@ -3508,13 +3508,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const liveDeductions = document.getElementById("live-deductions");
     const liveDeductionsBar = document.getElementById("live-deductions-bar");
     const liveDeductionsItem = document.getElementById("live-deductions-item");
-    
+
     // Extra elements
     const dependentsInput = document.getElementById("dependents");
     const maritalStatusSelect = document.getElementById("marital-status");
     const futureTypeSelect = document.getElementById("future-type");
     const monthlyIncomeInput = document.getElementById("monthly-income");
-    
+
     // Precedents benchmarking
     const evaluatorCard = document.getElementById("evaluator-card");
     const triggerEvalBtn = document.getElementById("trigger-eval-btn");
@@ -3564,7 +3564,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const toast = document.createElement("div");
         toast.className = `toast toast-${type}`;
-        
+
         let icon = "fa-info-circle";
         let color = "var(--color-primary, #3b82f6)";
         if (type === "success") {
@@ -3632,7 +3632,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function switchTab(tabName) {
         activeTab = tabName;
-        
+
         // Active indicator on navigation
         navItems.forEach(item => {
             if (item.getAttribute("data-tab") === tabName) {
@@ -3659,7 +3659,7 @@ document.addEventListener("DOMContentLoaded", () => {
             qdrant: "Qdrant Vector Database Explorer Dashboard"
         };
         tabTitleText.textContent = titleMap[tabName] || "Compensation Calculator Workstation";
-        
+
         // Trigger dashboard reload when viewing Qdrant DB Explorer
         if (tabName === "qdrant") {
             loadQdrantDashboard();
@@ -3675,7 +3675,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const qdrantDistance = document.getElementById("qdrant-distance");
     const qdrantVectorSize = document.getElementById("qdrant-vector-size");
     const refreshQdrantBtn = document.getElementById("refresh-qdrant-btn");
-    
+
     const payloadModal = document.getElementById("qdrant-payload-modal");
     const closePayloadModalBtn = document.getElementById("close-payload-modal-btn");
     const dismissPayloadModalBtn = document.getElementById("dismiss-payload-modal-btn");
@@ -3687,7 +3687,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     async function loadQdrantDashboard() {
         if (!qdrantPointsTableBody) return;
-        
+
         qdrantPointsTableBody.innerHTML = `
             <tr>
                 <td colspan="5" style="padding: 24px; text-align: center; color: var(--text-secondary);">
@@ -3725,7 +3725,7 @@ document.addEventListener("DOMContentLoaded", () => {
             data.points.forEach(point => {
                 const tr = document.createElement("tr");
                 tr.style.cssText = "border-bottom: 1px solid var(--border-glass); transition: background 0.2s ease;";
-                
+
                 // Highlight row on hover
                 tr.addEventListener("mouseenter", () => tr.style.background = "rgba(255, 255, 255, 0.01)");
                 tr.addEventListener("mouseleave", () => tr.style.background = "transparent");
@@ -3743,12 +3743,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     <td style="padding: 12px 16px; font-weight: 500;">${filename}</td>
                     <td style="padding: 12px 16px; text-align: center;"><span class="badge tech-badge" style="padding: 2px 6px;"># ${chunkId}</span></td>
                     <td style="padding: 12px 16px; color: var(--text-secondary); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">"${text}"</td>
-                    <td style="padding: 12px 16px; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
+                    <td style="padding: 12px 16px; text-align: right;">
                         <button type="button" class="btn btn-secondary btn-small view-payload-btn" data-point-id="${point.id}">
                             <i class="fa-solid fa-code"></i> Payload
-                        </button>
-                        <button type="button" class="btn btn-danger btn-small remove-doc-btn" data-filename="${filename.replace(/"/g, '&quot;')}">
-                            <i class="fa-solid fa-trash"></i> Remove
                         </button>
                     </td>
                 `;
@@ -3760,49 +3757,6 @@ document.addEventListener("DOMContentLoaded", () => {
                         payloadModal.classList.add("open");
                     }
                 });
-
-                // Bind remove document button
-                const removeBtn = tr.querySelector(".remove-doc-btn");
-                if (removeBtn) {
-                    removeBtn.addEventListener("click", async () => {
-                        const fname = removeBtn.getAttribute("data-filename");
-                        if (!confirm(`Are you sure you want to permanently delete document "${fname}" and all its vector chunks from the Qdrant database?`)) {
-                            return;
-                        }
-                        
-                        try {
-                            showToast(`Deleting document "${fname}"...`, "info");
-                            const delResponse = await fetch(`/api/qdrant/document/${encodeURIComponent(fname)}`, {
-                                method: "DELETE"
-                            });
-                            
-                            if (!delResponse.ok) {
-                                throw new Error(`HTTP error ${delResponse.status}`);
-                            }
-                            
-                            const delData = await delResponse.json();
-                            if (delData.success) {
-                                showToast(`Successfully removed "${fname}" from database.`, "success");
-                                
-                                // Remove file from in-memory fileQueue
-                                fileQueue = fileQueue.filter(f => f.filename !== fname);
-                                if (typeof renderQueueList === "function") {
-                                    renderQueueList();
-                                }
-                                
-                                // Refresh the points view
-                                if (typeof loadQdrantDashboard === "function") {
-                                    await loadQdrantDashboard();
-                                }
-                            } else {
-                                throw new Error(delData.message || "Failed to delete from database");
-                            }
-                        } catch (err) {
-                            console.error("Delete document error:", err);
-                            showToast(`Failed to delete document: ${err.message}`, "error");
-                        }
-                    });
-                }
 
                 qdrantPointsTableBody.appendChild(tr);
             });
@@ -3843,7 +3797,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const data = await response.json();
                 serverStatus.textContent = "Server Online";
                 pulseIndicator.className = "pulse-indicator active";
-                
+
                 if (data.vector_db === "online") {
                     dbStatusText.textContent = "Qdrant Vector DB: Online";
                     statusDot.className = "status-dot online";
@@ -3862,7 +3816,7 @@ document.addEventListener("DOMContentLoaded", () => {
             statusDot.className = "status-dot";
         }
     }
-    
+
     checkBackendHealth();
 
     // ==========================================================================
@@ -3870,24 +3824,24 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==========================================================================
     caseTypeSelect.addEventListener("change", (e) => {
         const caseType = e.target.value;
-        
+
         const existingBadge = document.querySelector(`.suggested-badge[data-field="case_type"]`);
         if (existingBadge) {
             existingBadge.remove();
         }
-        
+
         sharedFields.classList.remove("show");
         sharedFields.classList.add("hidden-section");
-        
+
         deathFields.classList.remove("show");
         deathFields.classList.add("hidden-section");
-        
+
         injuryFields.classList.remove("show");
         injuryFields.classList.add("hidden-section");
-        
+
         formActionsBar.classList.remove("show-flex");
         formActionsBar.classList.add("hidden-section");
-        
+
         if (liveMetricsCard) {
             liveMetricsCard.classList.remove("show");
             liveMetricsCard.classList.add("hidden-section");
@@ -3896,52 +3850,52 @@ document.addEventListener("DOMContentLoaded", () => {
             evaluatorCard.classList.remove("show");
             evaluatorCard.classList.add("hidden-section");
         }
-        
+
         singleUploadSection.classList.remove("show");
         singleUploadSection.classList.remove("show-flex");
         singleUploadSection.classList.add("hidden-section");
 
         sharedFields.classList.remove("hidden-section");
         sharedFields.classList.add("show");
-        
+
         singleUploadSection.classList.remove("hidden-section");
         singleUploadSection.classList.add("show-flex");
-        
+
         if (caseType === "injury") {
             injuryFields.classList.remove("hidden-section");
             injuryFields.classList.add("show");
-            
+
             if (liveDeductionsItem) liveDeductionsItem.classList.add("hidden");
             if (liveProspectsItem) liveProspectsItem.classList.add("hidden");
-            
+
             const labelDeps = document.getElementById("label-dependents");
             if (labelDeps) {
                 labelDeps.innerHTML = "Number of Dependents";
             }
             if (dependentsInput) dependentsInput.removeAttribute("required");
-            
+
             const futureProspectInput = document.getElementById("future-prospect");
             if (futureProspectInput) futureProspectInput.removeAttribute("required");
         } else if (caseType === "death") {
             deathFields.classList.remove("hidden-section");
             deathFields.classList.add("show");
-            
+
             if (liveDeductionsItem) liveDeductionsItem.classList.remove("hidden");
             if (liveProspectsItem) liveProspectsItem.classList.remove("hidden");
-            
+
             const labelDeps = document.getElementById("label-dependents");
             if (labelDeps) {
                 labelDeps.innerHTML = "Number of Dependents <span class=\"req\">*</span>";
             }
             if (dependentsInput) dependentsInput.setAttribute("required", "required");
-            
+
             const futureProspectInput = document.getElementById("future-prospect");
             if (futureProspectInput) futureProspectInput.setAttribute("required", "required");
         }
-        
+
         formActionsBar.classList.remove("hidden-section");
         formActionsBar.classList.add("show-flex");
-        
+
         if (liveMetricsCard) {
             liveMetricsCard.classList.remove("hidden-section");
             liveMetricsCard.classList.add("show");
@@ -3952,9 +3906,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         // Populate fields from local cache if we already ran extraction!
         populateFieldsForActiveCaseType();
-        
+
         updateLiveCalculations();
-        
+
         if (window.lastRawText) {
             checkCaseType(caseType, window.lastRawText);
         } else {
@@ -3977,7 +3931,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const dob = new Date(dobStr);
         const doa = new Date(doaStr);
         if (isNaN(dob.getTime()) || isNaN(doa.getTime())) return null;
-        
+
         let age = doa.getFullYear() - dob.getFullYear();
         const monthDiff = doa.getMonth() - dob.getMonth();
         if (monthDiff < 0 || (monthDiff === 0 && doa.getDate() < dob.getDate())) {
@@ -4035,13 +3989,13 @@ document.addEventListener("DOMContentLoaded", () => {
     function updateLiveCalculations() {
         const age = parseInt(ageInput.value);
         const caseType = caseTypeSelect.value;
-        
+
         if (!isNaN(age) && age >= 0) {
             if (liveAge) liveAge.textContent = `${age} years`;
-            
+
             const mult = getMultiplier(age);
             if (liveMultiplier) liveMultiplier.textContent = mult;
-            
+
             if (caseType === "death") {
                 const futureType = futureTypeSelect ? futureTypeSelect.value : 2;
                 const futureProspectInput = document.getElementById("future-prospect");
@@ -4054,18 +4008,18 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
                 if (liveProspects) liveProspects.textContent = `${prospects}%`;
                 if (liveProspectsBar) liveProspectsBar.style.width = `${prospects}%`;
-                
+
                 // Populate only helper parameters
                 const deathMultInput = document.getElementById("death-multiplier");
                 if (deathMultInput) deathMultInput.value = mult;
-                
+
                 const deps = parseInt(dependentsInput.value) || 0;
                 const status = maritalStatusSelect.value || "married";
                 const deductionRatio = getDeductionRatio(deps, status);
                 const deductionsPercent = Math.round(deductionRatio * 100);
                 if (liveDeductions) liveDeductions.textContent = `${deductionsPercent}%`;
                 if (liveDeductionsBar) liveDeductionsBar.style.width = `${deductionsPercent}%`;
-                
+
                 const deathDeductInput = document.getElementById("death-deduction");
                 if (deathDeductInput) deathDeductInput.value = deductionsPercent;
 
@@ -4119,14 +4073,14 @@ document.addEventListener("DOMContentLoaded", () => {
     dependentsInput.addEventListener("input", updateLiveCalculations);
     monthlyIncomeInput.addEventListener("input", updateLiveCalculations);
     ageInput.addEventListener("input", handleRecalculateDefaultProspects);
-    
+
     // Set dynamic update bindings for new Death Claim inputs and prospects field manual override
     setTimeout(() => {
         const consInput = document.getElementById("consortium");
         const funInput = document.getElementById("funeral-expenses");
         const estInput = document.getElementById("loss-estate");
         const futureProspectInput = document.getElementById("future-prospect");
-        
+
         if (consInput) consInput.addEventListener("input", updateLiveCalculations);
         if (funInput) funInput.addEventListener("input", updateLiveCalculations);
         if (estInput) estInput.addEventListener("input", updateLiveCalculations);
@@ -4154,7 +4108,7 @@ document.addEventListener("DOMContentLoaded", () => {
         e.preventDefault();
         e.stopPropagation();
         singleDropZone.classList.remove("dragover");
-        
+
         const dt = e.dataTransfer;
         const files = dt.files;
         if (files.length > 0) {
@@ -4241,14 +4195,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 partialBuffer += decoder.decode(value, { stream: true });
                 const lines = partialBuffer.split("\n");
-                
+
                 // Keep the last item in the buffer as it might be incomplete
                 partialBuffer = lines.pop();
 
                 for (const line of lines) {
                     const cleanLine = line.trim();
                     if (!cleanLine.startsWith("data: ")) continue;
-                    
+
                     const payload = cleanLine.slice(6);
                     const data = JSON.parse(payload);
 
@@ -4274,9 +4228,9 @@ document.addEventListener("DOMContentLoaded", () => {
                             // Engine colour coding
                             const engineColor = pg.engine === "PaddleOCR" || pg.engine === "PaddleOCR-Retry"
                                 ? "#34d399" : pg.engine === "PyMuPDF"
-                                ? "#60a5fa" : pg.engine === "Tesseract"
-                                ? "#fbbf24" : pg.engine === "Skipped-blank"
-                                ? "#6b7280" : "#a78bfa";
+                                    ? "#60a5fa" : pg.engine === "Tesseract"
+                                        ? "#fbbf24" : pg.engine === "Skipped-blank"
+                                            ? "#6b7280" : "#a78bfa";
 
                             // Add or update page chip in the grid
                             const grid = loader.querySelector("#ocr-page-grid");
@@ -4294,7 +4248,7 @@ document.addEventListener("DOMContentLoaded", () => {
                                 chip.style.borderColor = engineColor + "55";
                                 chip.style.color = engineColor;
                                 chip.title = `Page ${pg.page} | ${pg.engine} | conf:${confPct}% | lines:${pg.lines} | ${pg.total_page_time}s`;
-                                chip.innerHTML = `<span style="font-weight:700;">P${pg.page}</span><br>${pg.engine ? pg.engine.replace("PaddleOCR","Paddle").replace("Tesseract","Tess").replace("PyMuPDF","Fitz").replace("Skipped-blank","Skip").replace("-Retry","↺") : "?"}<br>${confPct}%`;
+                                chip.innerHTML = `<span style="font-weight:700;">P${pg.page}</span><br>${pg.engine ? pg.engine.replace("PaddleOCR", "Paddle").replace("Tesseract", "Tess").replace("PyMuPDF", "Fitz").replace("Skipped-blank", "Skip").replace("-Retry", "↺") : "?"}<br>${confPct}%`;
                                 // Scroll newest chip into view
                                 chip.scrollIntoView({ block: "nearest" });
                             }
@@ -4303,8 +4257,8 @@ document.addEventListener("DOMContentLoaded", () => {
                             const logEl = loader.querySelector("#ocr-recent-log");
                             if (logEl) {
                                 const logLine = document.createElement("div");
-                                const engShort = (pg.engine || "?").replace("PaddleOCR-Retry","Paddle↺");
-                                logLine.textContent = `[P${String(pg.page).padStart(2,"0")}] ${engShort.padEnd(10)} conf:${String(Math.round((pg.confidence||0)*100)).padStart(3)}%  lines:${String(pg.lines).padStart(3)}  ${pg.total_page_time}s`;
+                                const engShort = (pg.engine || "?").replace("PaddleOCR-Retry", "Paddle↺");
+                                logLine.textContent = `[P${String(pg.page).padStart(2, "0")}] ${engShort.padEnd(10)} conf:${String(Math.round((pg.confidence || 0) * 100)).padStart(3)}%  lines:${String(pg.lines).padStart(3)}  ${pg.total_page_time}s`;
                                 logEl.prepend(logLine);
                                 while (logEl.children.length > 4) logEl.removeChild(logEl.lastChild);
                             }
@@ -4405,7 +4359,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==========================================================================
     // BATCH PDF MANAGER (DRAG & DROP + POLLING QUEUE)
     // ==========================================================================
-    
+
     // Drag events
     ["dragenter", "dragover"].forEach(eventName => {
         dropZone.addEventListener(eventName, (e) => {
@@ -4425,7 +4379,7 @@ document.addEventListener("DOMContentLoaded", () => {
         e.preventDefault();
         e.stopPropagation();
         dropZone.classList.remove("dragover");
-        
+
         const dt = e.dataTransfer;
         const files = dt.files;
         if (files.length > 0) {
@@ -4461,7 +4415,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (isPdf) {
                 formData.append("files", file);
                 validPdfCount++;
-                
+
                 // Map local filename to the file object to facilitate local iframe previewing!
                 uploadedFileObjects[file.name] = file;
             }
@@ -4483,7 +4437,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             const data = await response.json();
-            
+
             // Append files to our local tracker
             data.queue.forEach(item => {
                 fileQueue.push({
@@ -4556,15 +4510,19 @@ document.addEventListener("DOMContentLoaded", () => {
                         <button type="button" class="btn btn-small btn-success autofill-queue-btn" data-id="${file.file_id}">
                             <i class="fa-solid fa-arrow-left"></i> Auto-fill form
                         </button>
+                        <button type="button" class="btn btn-small btn-danger remove-indexed-btn" data-id="${file.file_id}" data-filename="${file.filename}" title="Remove from database and chat">
+                            <i class="fa-solid fa-trash"></i> Remove
+                        </button>
                     </div>
                 ` : ""}
             `;
 
             // Bind click to previews
             item.addEventListener("click", (e) => {
-                // Prevent trigger if they click the autofill button specifically
+                // Prevent trigger if they click action buttons
                 if (e.target.closest(".autofill-queue-btn")) return;
-                
+                if (e.target.closest(".remove-indexed-btn")) return;
+
                 document.querySelectorAll(".batch-file-item").forEach(c => c.classList.remove("active-preview"));
                 item.classList.add("active-preview");
                 loadPdfPreview(file.filename);
@@ -4582,6 +4540,50 @@ document.addEventListener("DOMContentLoaded", () => {
                 const matchedFile = fileQueue.find(f => f.file_id === id);
                 if (matchedFile) {
                     showAutofillChoiceModal(matchedFile);
+                }
+            });
+        });
+
+        // Bind clicks on remove buttons
+        document.querySelectorAll(".remove-indexed-btn").forEach(btn => {
+            btn.addEventListener("click", async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const id = btn.getAttribute("data-id");
+                const filename = btn.getAttribute("data-filename");
+                if (!confirm(`Remove "${filename}" from the vector database and AI chat?
+
+This cannot be undone.`)) return;
+
+                // Visual feedback — disable button while deleting
+                btn.disabled = true;
+                btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Removing...`;
+
+                try {
+                    const res = await fetch(`/api/qdrant/document/${encodeURIComponent(filename)}`, {
+                        method: "DELETE"
+                    });
+                    const data = await res.json();
+
+                    if (data.success) {
+                        // Remove from local fileQueue
+                        const idx = fileQueue.findIndex(f => f.file_id === id);
+                        if (idx !== -1) fileQueue.splice(idx, 1);
+
+                        showToast(`"${filename}" removed from database.`, "success");
+                        renderQueueList();
+
+                        // Re-sync the chat document filter dropdown
+                        syncChatDocumentFilter();
+                    } else {
+                        btn.disabled = false;
+                        btn.innerHTML = `<i class="fa-solid fa-trash"></i> Remove`;
+                        showToast(`Failed to remove: ${data.detail || "Unknown error"}`, "error");
+                    }
+                } catch (err) {
+                    btn.disabled = false;
+                    btn.innerHTML = `<i class="fa-solid fa-trash"></i> Remove`;
+                    showToast(`Network error while removing file.`, "error");
                 }
             });
         });
@@ -4612,7 +4614,7 @@ document.addEventListener("DOMContentLoaded", () => {
             choiceModal.classList.remove("open");
             if (matchedFile.suggestions) {
                 stopOcrTimerSuccess();
-                
+
                 // Store raw text for AI data recovery if they want to click it manually later
                 currentOcrRawText = matchedFile.raw_text || [];
                 if (aiExtractBtn) {
@@ -4638,15 +4640,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
 
                 applyAllOcrSuggestions(matchedFile.suggestions);
-                
+
                 if (matchedFile.ocr_debug) {
                     updateOcrInspector(matchedFile);
                     triggerTabNotification("ocr-quality");
                 }
-                
+
                 window.lastRawText = (matchedFile.raw_text || []).join("\n");
                 checkCaseType(caseTypeSelect.value, window.lastRawText);
-                
+
                 switchTab("calculator");
             } else {
                 showToast("No pre-parsed heuristic data available for this file.", "warning");
@@ -4666,7 +4668,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             choiceModal.classList.remove("open");
-            
+
             // Set currentOcrRawText from batch file
             currentOcrRawText = rawTextLines;
             window.lastRawText = currentOcrRawText.join("\n");
@@ -4696,7 +4698,7 @@ document.addEventListener("DOMContentLoaded", () => {
             // Show spinning loader overlay in workstation panel
             const formPanel = document.querySelector("#tab-calculator .panel.scroll-y");
             if (!formPanel) return;
-            
+
             const loader = document.createElement("div");
             loader.className = "form-ocr-loader";
             loader.innerHTML = `
@@ -4726,7 +4728,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (data.success) {
                     const confidenceScores = data.raw_recovered ? data.raw_recovered.confidence_scores : null;
                     const ocrEvidence = data.raw_recovered ? data.raw_recovered.ocr_evidence_case : null;
-                    
+
                     // Apply suggestions exactly the same way as clicking "Ask LLM to Extract" manually
                     applyAllOcrSuggestions(data.suggestions, confidenceScores, ocrEvidence, data.raw_recovered);
                     showToast("AI data extraction complete! All recovered parameters cached internally.", "success");
@@ -4776,7 +4778,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Generate instant in-memory Blob URL for local PDF rendering
         const blobUrl = URL.createObjectURL(fileObj);
-        
+
         previewFilenameBadge.classList.remove("hidden");
         previewFilenameBadge.textContent = filename;
 
@@ -4789,7 +4791,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function startQueuePolling() {
         if (isPolling) return;
         isPolling = true;
-        
+
         const pollInterval = setInterval(async () => {
             // Only poll if we have queued/active files
             const activeFiles = fileQueue.filter(f => f.status === "queued" || f.status === "scanning" || f.status === "indexing");
@@ -4804,7 +4806,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const response = await fetch("/api/ocr/batch-status");
                 if (response.ok) {
                     const data = await response.json();
-                    
+
                     // Sync backend statuses with local queue
                     data.queue.forEach(srvItem => {
                         const localIndex = fileQueue.findIndex(f => f.file_id === srvItem.file_id);
@@ -4914,7 +4916,7 @@ document.addEventListener("DOMContentLoaded", () => {
         Object.keys(deathMapping).forEach(cacheKey => {
             populateField(cacheKey, deathMapping[cacheKey], isDeath);
         });
-        
+
         updateLiveCalculations();
     }
 
@@ -4947,7 +4949,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         }
         if (confidenceVal) confidenceVal.textContent = (avgConfidence * 100).toFixed(1) + "%";
-        
+
         if (overwriteBlockedVal) {
             overwriteBlockedVal.textContent = overwriteBlocked ? "TRUE" : "FALSE";
             if (overwriteBlocked) {
@@ -4963,17 +4965,17 @@ document.addEventListener("DOMContentLoaded", () => {
             const timestamp = new Date().toLocaleTimeString();
             const logMsg = document.createElement("div");
             logMsg.style.marginBottom = "4px";
-            
+
             if (overwriteBlocked) {
                 logMsg.innerHTML = `<span style="color: #ef4444;">[${timestamp}] [WARN] Overwrite Blocked!</span> Manual Case Type '${displayMap[userCase]}' preserved over predicted '${displayMap[llmCase]}'.`;
             } else {
                 logMsg.innerHTML = `<span style="color: #34d399;">[${timestamp}] [AUDIT]</span> Applied suggestions. User: ${displayMap[userCase]} | LLM: ${displayMap[llmCase]} | OCR: ${ocrEvidence}.`;
             }
-            
+
             if (terminal.children.length > 20) {
                 terminal.removeChild(terminal.children[0]);
             }
-            
+
             terminal.appendChild(logMsg);
             terminal.scrollTop = terminal.scrollHeight;
         }
@@ -4985,10 +4987,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Normalize flat suggestions into expected nested structure
         if (suggestions && !suggestions.fields) {
-            const { case_type, low_confidence_fields, ocr_quality_insufficient, 
-                    ocr_warning, partial_extraction_recovery_mode, 
-                    fallback_source_used, award_amount, total_compensation,
-                    ai_recovery_triggered, ...fieldValues } = suggestions;
+            const { case_type, low_confidence_fields, ocr_quality_insufficient,
+                ocr_warning, partial_extraction_recovery_mode,
+                fallback_source_used, award_amount, total_compensation,
+                ai_recovery_triggered, ...fieldValues } = suggestions;
             suggestions = {
                 case_type: case_type,
                 fields: fieldValues,
@@ -5014,38 +5016,38 @@ document.addEventListener("DOMContentLoaded", () => {
         if (currentCaseType && currentCaseType !== "") {
             if (suggestionsCaseType && suggestionsCaseType !== currentCaseType) {
                 overwriteBlocked = true;
-                
+
                 // Show interactive suggestion badge under case type dropdown
                 const parent = caseTypeSelect.closest(".form-group");
                 if (parent) {
                     const badge = document.createElement("div");
                     badge.className = "suggested-badge ai-metadata-badge";
                     badge.setAttribute("data-field", "case_type");
-                    
+
                     const displayVal = suggestionsCaseType === "injury" ? "Injury Case" : "Death Case";
                     // Find confidence score for case_type if available, default to 95%
                     let conf = 0.95;
                     if (confidenceScores && confidenceScores.case_type) {
-                        conf = confidenceScores.case_type.confidence !== undefined 
-                            ? confidenceScores.case_type.confidence 
+                        conf = confidenceScores.case_type.confidence !== undefined
+                            ? confidenceScores.case_type.confidence
                             : confidenceScores.case_type;
                     } else if (suggestions.confidence_scores && suggestions.confidence_scores.case_type) {
-                        conf = suggestions.confidence_scores.case_type.confidence !== undefined 
-                            ? suggestions.confidence_scores.case_type.confidence 
+                        conf = suggestions.confidence_scores.case_type.confidence !== undefined
+                            ? suggestions.confidence_scores.case_type.confidence
                             : suggestions.confidence_scores.case_type;
                     }
                     conf = typeof conf === "number" ? conf : parseFloat(conf) || 0.95;
                     if (conf > 1.0) conf = conf / 100.0;
-                    
+
                     badge.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> Suggest: ${displayVal} (${Math.round(conf * 100)}%)`;
-                    
+
                     badge.addEventListener("click", () => {
                         caseTypeSelect.value = suggestionsCaseType;
                         caseTypeSelect.dispatchEvent(new Event("change"));
                         badge.remove();
                         showToast(`Switched to suggested Case Type: ${displayVal}!`, "success");
                     });
-                    
+
                     parent.appendChild(badge);
                 }
             }
@@ -5059,7 +5061,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Cache all fields (Part 5 & Part 6)
         const fields = suggestions.fields || {};
-        
+
         Object.keys(fields).forEach(key => {
             lastExtractedFields[key] = fields[key];
         });
@@ -5067,18 +5069,18 @@ document.addEventListener("DOMContentLoaded", () => {
         // ── Alias normalisation: map LLM/heuristic field name variants to
         //    the canonical keys that injuryMapping/deathMapping expect ──────
         const fieldAliases = {
-            "disability_percentage":   "disability",
-            "permanent_disability":    "disability",
-            "accident_date":           "date_of_accident",
-            "dob":                     "date_of_birth",
-            "accident_place":          "place_of_accident",
-            "loss_of_consortium":      "consortium",
-            "loss_of_estate":          "loss_estate",
-            "loss_estate":             "loss_estate",
-            "funeral":                 "funeral_expenses",
-            "claimant_name":           "name",
-            "injured_name":            "name",
-            "deceased_name":           "name",
+            "disability_percentage": "disability",
+            "permanent_disability": "disability",
+            "accident_date": "date_of_accident",
+            "dob": "date_of_birth",
+            "accident_place": "place_of_accident",
+            "loss_of_consortium": "consortium",
+            "loss_of_estate": "loss_estate",
+            "loss_estate": "loss_estate",
+            "funeral": "funeral_expenses",
+            "claimant_name": "name",
+            "injured_name": "name",
+            "deceased_name": "name",
         };
         Object.keys(fieldAliases).forEach(src => {
             const dst = fieldAliases[src];
@@ -5158,11 +5160,11 @@ document.addEventListener("DOMContentLoaded", () => {
         // Cache confidences
         const lowConfFields = suggestions.low_confidence_fields || [];
         const combinedKeys = new Set([...Object.keys(lastExtractedFields), "date_of_birth", "date_of_accident"]);
-        
+
         combinedKeys.forEach(key => {
             if (confidenceScores && confidenceScores[key]) {
-                const confVal = confidenceScores[key].confidence !== undefined 
-                    ? confidenceScores[key].confidence 
+                const confVal = confidenceScores[key].confidence !== undefined
+                    ? confidenceScores[key].confidence
                     : confidenceScores[key];
                 lastExtractedConfidences[key] = typeof confVal === "number" ? confVal : parseFloat(confVal) || 1.0;
             } else if (lastExtractedConfidences[key] === undefined) {
@@ -5196,7 +5198,7 @@ document.addEventListener("DOMContentLoaded", () => {
         } else {
             showToast(`Workstation variables successfully auto-filled!`, "success");
         }
-        
+
         // Auto trigger automatic recalculation after autofill is completed (Task 18)
         setTimeout(() => {
             console.log("AUTO RECALCULATING after OCR autofill...");
@@ -5266,13 +5268,13 @@ document.addEventListener("DOMContentLoaded", () => {
     function syncChatDocumentFilter() {
         const chatDocumentFilter = document.getElementById("chat-document-filter");
         if (!chatDocumentFilter) return;
-        
+
         const currentSelection = chatDocumentFilter.value;
-        
+
         chatDocumentFilter.innerHTML = '<option value="all">All Documents</option>';
-        
+
         const indexedFiles = fileQueue.filter(f => f.status === "indexed").map(f => f.filename);
-        
+
         const uniqueFiles = [...new Set(indexedFiles)];
         uniqueFiles.forEach(filename => {
             const opt = document.createElement("option");
@@ -5280,7 +5282,7 @@ document.addEventListener("DOMContentLoaded", () => {
             opt.textContent = filename;
             chatDocumentFilter.appendChild(opt);
         });
-        
+
         if (uniqueFiles.includes(currentSelection)) {
             chatDocumentFilter.value = currentSelection;
         }
@@ -5310,7 +5312,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 message: query,
                 case_type: chatCaseFilter.value
             };
-            
+
             const chatDocumentFilter = document.getElementById("chat-document-filter");
             const docFilterVal = chatDocumentFilter ? chatDocumentFilter.value : "all";
             if (docFilterVal !== "all") {
@@ -5325,10 +5327,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (!response.ok) throw new Error("Search API failure");
             const data = await response.json();
-            
+
             // Remove loading bubble
             document.getElementById(loadingId).remove();
-            
+
             // Render structured markdown legal response
             appendChatBubble(data.response, "bot");
 
@@ -5344,9 +5346,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const id = `msg_${Date.now()}`;
         bubble.id = id;
         bubble.className = `chat-bubble ${sender}`;
-        
+
         const avatarHtml = sender === "bot" ? `<i class="fa-solid fa-robot"></i>` : `<i class="fa-solid fa-user-tie"></i>`;
-        
+
         // Render markdown formatting inside bubble text (simple converter)
         let formattedText = text;
         if (!isLoader) {
@@ -5360,7 +5362,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <div class="chat-avatar">${avatarHtml}</div>
             <div class="chat-text">${formattedText}</div>
         `;
-        
+
         chatMessages.appendChild(bubble);
         chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -5438,15 +5440,15 @@ document.addEventListener("DOMContentLoaded", () => {
         const cal = req.calculated_amount;
         const avg = cal * (0.93 + Math.random() * 0.12);
         const margin = ((cal - avg) / avg) * 100;
-        
+
         return {
             calculated_amount: cal,
             average_precedent_award: Math.round(avg),
             margin_percent: Math.round(margin * 100) / 100,
             alignment: Math.abs(margin) <= 5.0 ? "aligned" : (margin > 5.0 ? "high" : "low"),
-            recommendation: Math.abs(margin) <= 5.0 
-                ? `Calculated award is extremely well-aligned with precedents (${margin > 0 ? '+':''}${margin.toFixed(1)}% margin).`
-                : `Calculated award is ${Math.abs(margin).toFixed(1)}% ${margin > 0 ? 'higher':'lower'} than precedent averages.`,
+            recommendation: Math.abs(margin) <= 5.0
+                ? `Calculated award is extremely well-aligned with precedents (${margin > 0 ? '+' : ''}${margin.toFixed(1)}% margin).`
+                : `Calculated award is ${Math.abs(margin).toFixed(1)}% ${margin > 0 ? 'higher' : 'lower'} than precedent averages.`,
             insurance_defense: `Historically claims of similar profiles average around Rs. ${Math.round(avg).toLocaleString('en-IN')}.`,
             claimant_argument: `Judicial precedents reach up to Rs. ${Math.round(avg * 1.1).toLocaleString('en-IN')}.`,
             precedents: [
@@ -5494,7 +5496,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             <!-- Alignment and margin -->
             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-                <span class="card-text">Award Margin: <strong>${evalData.margin_percent > 0 ? '+':''}${evalData.margin_percent}%</strong></span>
+                <span class="card-text">Award Margin: <strong>${evalData.margin_percent > 0 ? '+' : ''}${evalData.margin_percent}%</strong></span>
                 ${alignLabels[evalData.alignment] || ""}
             </div>
 
@@ -5528,7 +5530,7 @@ document.addEventListener("DOMContentLoaded", () => {
     compensationForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         console.log("CALCULATE CLICKED");
-        
+
         const caseType = caseTypeSelect.value;
         if (!caseType) {
             showToast("Please select a case type first!", "warning");
@@ -5551,7 +5553,7 @@ document.addEventListener("DOMContentLoaded", () => {
             case_type: caseType,
             age: Number(ageInput.value || 0),
             monthly_income: Number(monthlyIncomeInput.value || 0),
-            
+
             dependents: Number(dependentsInput.value || 0),
             marital_status: maritalStatusSelect.value || "married",
             future_type: Number(futureTypeSelect?.value || 2),
@@ -5571,7 +5573,7 @@ document.addEventListener("DOMContentLoaded", () => {
             conhus: 0,
             conbro: 0,
             consis: 0,
-            
+
             disability: Number(document.getElementById("disability")?.value || 0),
             medical_expenses: Number(document.getElementById("medical-expenses")?.value || 0),
             future_medical_expenses: Number(document.getElementById("future-medical-expenses")?.value || 0),
@@ -5600,18 +5602,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (!response.ok) throw new Error("Server calculator returned error status");
             const results = await response.json();
-            
+
             if (results.success === false) {
                 throw new Error(results.error || "Server calculation process failed");
             }
-            
+
             // Align with nested schema: use results.breakdown if available, otherwise flat results
             const breakdown = results.breakdown || results;
             currentCalculationAmount = results.total_compensation || breakdown.final_amount || 0;
-            
+
             // Update inputs and previews with real calculated money values
             updateMonetaryOutputs(breakdown);
-            
+
             renderResultsDashboard(breakdown, payload);
             openModal();
             showToast("Compensation calculated successfully via FastAPI server!", "success");
@@ -5622,14 +5624,14 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (error) {
             console.error("Server-side calculation failed:", error);
             showToast(`Backend computation failed: ${error.message}. Running local mathematical fallback engine.`, "warning");
-            
+
             const localResults = calculateCompensationLocally(payload);
-            
+
             currentCalculationAmount = localResults.final_amount;
-            
+
             // Update inputs and previews with real calculated money values locally
             updateMonetaryOutputs(localResults);
-            
+
             renderResultsDashboard(localResults, payload);
             openModal();
             if (triggerEvalBtn) triggerEvalBtn.disabled = false;
@@ -5676,9 +5678,9 @@ document.addEventListener("DOMContentLoaded", () => {
             };
         } else {
             const disabilityCompensation = annual * (data.disability / 100) * multiplier;
-            const finalCompensation = disabilityCompensation + data.medical_expenses + data.future_medical_expenses + 
+            const finalCompensation = disabilityCompensation + data.medical_expenses + data.future_medical_expenses +
                 data.pain_and_suffering + data.transportation + data.special_diet + data.attender_charges + data.loss_of_income;
-            
+
             return {
                 case_type: "injury",
                 multiplier: multiplier,
@@ -5744,27 +5746,27 @@ document.addEventListener("DOMContentLoaded", () => {
     function updateOcrInspector(data) {
         if (!data || !data.ocr_debug) return;
         const debug = data.ocr_debug;
-        
+
         // 1. Overall stats
         const qScore = debug.ocr_quality_score !== undefined ? debug.ocr_quality_score : 0.0;
         const avgConf = debug.average_page_confidence !== undefined ? debug.average_page_confidence : 0.0;
         const textDensity = debug.text_density_score !== undefined ? debug.text_density_score : 0.0;
-        
+
         const qEl = document.getElementById("ocr-val-quality");
         if (qEl) qEl.textContent = qScore.toFixed(3);
-        
+
         const cEl = document.getElementById("ocr-val-confidence");
         if (cEl) cEl.textContent = (avgConf * 100).toFixed(1) + "%";
-        
+
         const eEl = document.getElementById("ocr-val-engine");
         if (eEl) eEl.textContent = debug.ocr_engine_used || "Unknown";
-        
+
         const fEl = document.getElementById("ocr-val-fallback");
         if (fEl) fEl.textContent = debug.fallback_ocr_engine || "None";
-        
+
         const rEl = document.getElementById("ocr-val-retries");
         if (rEl) rEl.textContent = debug.ocr_retry_count !== undefined ? debug.ocr_retry_count : 0;
-        
+
         const dEl = document.getElementById("ocr-val-density");
         if (dEl) dEl.textContent = textDensity.toFixed(3);
 
@@ -5773,7 +5775,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const durationSec = debug.total_ocr_time !== undefined ? debug.total_ocr_time : ocrSecondsElapsed;
             durationEl.textContent = typeof durationSec === "number" ? formatTimeMMSS(Math.round(durationSec)) : durationSec || "—";
         }
-        
+
         // Update badge
         const badge = document.getElementById("ocr-inspector-badge");
         if (badge) {
@@ -5795,14 +5797,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 debug.pages.forEach(p => {
                     const tr = document.createElement("tr");
                     tr.style.borderBottom = "1px solid var(--border-glass)";
-                    
+
                     const pageNum = p.page || 1;
                     const engine = p.engine || "PaddleOCR";
                     const dpi = p.dpi || 180;
                     const pageTime = p.total_page_time !== undefined ? p.total_page_time.toFixed(2) + "s" : "—";
                     const conf = p.confidence !== undefined ? (p.confidence * 100).toFixed(1) + "%" : "—";
                     const quality = p.quality_score !== undefined ? p.quality_score.toFixed(3) : "—";
-                    
+
                     tr.innerHTML = `
                         <td style="padding: 8px 12px; font-weight: 600; color: var(--text-primary);">Page ${pageNum}</td>
                         <td style="padding: 8px 12px; color: var(--text-secondary);">${engine}</td>
@@ -5839,7 +5841,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const monthlyIncomeVal = res.monthly_income !== undefined ? res.monthly_income : req.monthly_income;
             const enhancedMonthlyIncomeVal = res.enhanced_monthly_income !== undefined ? res.enhanced_monthly_income : (monthlyIncomeVal * (1 + futureProspectPercent / 100));
             const annualIncomeVal = res.annual_income !== undefined ? res.annual_income : (enhancedMonthlyIncomeVal * 12);
-            
+
             parametersHtml = `
                 <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-glass);">
                     <span>Monthly Income</span>
@@ -5958,14 +5960,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.getElementById("reset-btn").addEventListener("click", () => {
         compensationForm.reset();
-        
+
         window.lastRawText = "";
         const suggestionDiv = document.getElementById("case-type-suggestion");
         if (suggestionDiv) {
             suggestionDiv.innerHTML = "";
             suggestionDiv.classList.add("hidden-section");
         }
-        
+
         // Clear all live calculated dashboard elements back to hyphens
         ["live-calc-annual", "live-calc-future", "live-calc-deduct-pct", "live-calc-deduct-amt", "live-calc-multiplier", "live-calc-dependency", "live-calc-total"].forEach(id => {
             const el = document.getElementById(id);
@@ -6007,19 +6009,19 @@ document.addEventListener("DOMContentLoaded", () => {
             elapsedText.textContent = "Ready";
             elapsedText.style.color = "var(--text-secondary)";
         }
-        
+
         sharedFields.classList.remove("show");
         sharedFields.classList.add("hidden-section");
-        
+
         deathFields.classList.remove("show");
         deathFields.classList.add("hidden-section");
-        
+
         injuryFields.classList.remove("show");
         injuryFields.classList.add("hidden-section");
-        
+
         formActionsBar.classList.remove("show-flex");
         formActionsBar.classList.add("hidden-section");
-        
+
         if (liveMetricsCard) {
             liveMetricsCard.classList.remove("show");
             liveMetricsCard.classList.add("hidden-section");
@@ -6028,7 +6030,7 @@ document.addEventListener("DOMContentLoaded", () => {
             evaluatorCard.classList.remove("show");
             evaluatorCard.classList.add("hidden-section");
         }
-        
+
         singleUploadSection.classList.remove("show");
         singleUploadSection.classList.remove("show-flex");
         singleUploadSection.classList.add("hidden-section");
@@ -6041,7 +6043,7 @@ document.addEventListener("DOMContentLoaded", () => {
             </div>
         `;
         singlePreviewFilename.textContent = "No File Loaded";
-        
+
         const summaryCard = document.getElementById("legal-ai-summary-card");
         if (summaryCard) {
             summaryCard.classList.add("hidden-section");
@@ -6056,7 +6058,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 `;
             }
         }
-        
+
         const tableCard = document.getElementById("compensation-table-card");
         if (tableCard) {
             tableCard.classList.add("hidden-section");
@@ -6071,7 +6073,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 `;
             }
         }
-        
+
         triggerEvalBtn.disabled = true;
         currentCalculationAmount = 0;
     });
@@ -6080,7 +6082,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const slideover = document.getElementById("right-slideover");
     const closeSlideover = document.getElementById("close-slideover");
     const aiAssistantTrigger = document.getElementById("ai-assistant-trigger");
-    
+
     const assistantChatMessages = document.getElementById("assistant-chat-messages");
     const assistantChatInput = document.getElementById("assistant-chat-input");
     const assistantChatSendBtn = document.getElementById("assistant-chat-send-btn");
@@ -6095,7 +6097,7 @@ document.addEventListener("DOMContentLoaded", () => {
     paneTabButtons.forEach(btn => {
         btn.addEventListener("click", () => {
             const targetTab = btn.getAttribute("data-pane-tab");
-            
+
             // Switch tabs active styles
             paneTabButtons.forEach(b => {
                 if (b === btn) {
@@ -6140,7 +6142,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // Helper to trigger tab notification dot rather than forcing switch
-    window.triggerTabNotification = function(tabName) {
+    window.triggerTabNotification = function (tabName) {
         if (getActiveRightPaneTab() !== tabName) {
             if (tabName === "benchmarking" && benchmarkingTabDot) {
                 benchmarkingTabDot.classList.remove("hidden");
@@ -6158,14 +6160,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const closeChatModalBtn = document.getElementById("close-chat-modal-btn");
     const dismissChatModalBtn = document.getElementById("dismiss-chat-modal-btn");
 
-    window.openChatReader = function(htmlContent) {
+    window.openChatReader = function (htmlContent) {
         if (chatReadModal && chatModalBodyContent) {
             chatModalBodyContent.innerHTML = htmlContent;
             chatReadModal.classList.add("open");
         }
     };
 
-    window.closeChatReader = function() {
+    window.closeChatReader = function () {
         if (chatReadModal) {
             chatReadModal.classList.remove("open");
         }
@@ -6173,7 +6175,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (closeChatModalBtn) closeChatModalBtn.addEventListener("click", closeChatReader);
     if (dismissChatModalBtn) dismissChatModalBtn.addEventListener("click", closeChatReader);
-    
+
     // Close modal when clicking outside content area
     window.addEventListener("click", (e) => {
         if (e.target === chatReadModal) {
@@ -6182,7 +6184,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // Function to attach click listeners to chat texts
-    window.bindChatBubbleClick = function(bubbleElement) {
+    window.bindChatBubbleClick = function (bubbleElement) {
         const textElement = bubbleElement.querySelector(".chat-text");
         if (textElement) {
             textElement.addEventListener("click", () => {
@@ -6222,10 +6224,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 closeDrawer();
                 return;
             }
-            
+
             aiAssistantTrigger.classList.add("active");
             slideover.classList.add("open");
-            
+
             // Auto generate CASE BRIEF on open
             generateCaseBrief();
         });
@@ -6254,20 +6256,20 @@ document.addEventListener("DOMContentLoaded", () => {
     function generateCaseBrief() {
         const caseType = caseTypeSelect.value || "N/A";
         const caseTypeLabel = caseType === "death" ? "Death Claim" : (caseType === "injury" ? "Injury Claim" : "N/A");
-        
+
         const claimantName = document.getElementById("name")?.value || "N/A";
-        const respondentName = "Insurance Company / Respondent"; 
+        const respondentName = "Insurance Company / Respondent";
         const ageVal = ageInput.value ? `${ageInput.value} years` : "N/A";
         const monthlyIncome = parseFloat(monthlyIncomeInput.value) || 0;
         const incomeVal = monthlyIncome > 0 ? formatCurrency(monthlyIncome) : "N/A";
-        
+
         const disabilityInput = document.getElementById("disability");
         const disabilityVal = (caseType === "injury" && disabilityInput && disabilityInput.value) ? `${disabilityInput.value}%` : "N/A";
-        
+
         const awardAmountVal = currentCalculationAmount > 0 ? formatCurrency(currentCalculationAmount) : "N/A";
         const statusVal = currentCalculationAmount > 0 ? "Calculated (Deterministic Math)" : "Awaiting Mathematical Input";
-        
-        const occupationVal = "Salaried / Self-Employed"; 
+
+        const occupationVal = "Salaried / Self-Employed";
 
         const contentEl = document.getElementById("assistant-case-brief-content");
         if (contentEl) {
@@ -6378,9 +6380,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const id = `ast_msg_${Date.now()}`;
         bubble.id = id;
         bubble.className = `chat-bubble ${sender}`;
-        
+
         const avatarHtml = sender === "bot" ? `<i class="fa-solid fa-robot"></i>` : `<i class="fa-solid fa-user-tie"></i>`;
-        
+
         let formattedText = text;
         if (!isLoader && sender === "bot" && !text.includes("<ul") && !text.includes("<table")) {
             formattedText = text
@@ -6393,7 +6395,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <div class="chat-avatar">${avatarHtml}</div>
             <div class="chat-text" style="flex: 1; min-width: 0; overflow-wrap: break-word; font-size: 0.85rem; line-height: 1.5;">${formattedText}</div>
         `;
-        
+
         assistantChatMessages.appendChild(bubble);
         assistantChatMessages.scrollTop = assistantChatMessages.scrollHeight;
 
