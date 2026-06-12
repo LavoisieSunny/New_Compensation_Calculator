@@ -4,13 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Compensation Calculator & Centralized Qdrant Vector DB</title>
-    <!-- Google Fonts: Outfit for Headings, Inter for Body -->
+    
+    <!-- Typography: Google Fonts setup for headings (Outfit) and body (Inter) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- FontAwesome for Legal and Premium Icons -->
+    
+    <!-- Legal and Workstation Icons: FontAwesome CDN link -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Custom Style Sheet -->
+    
+    <!-- Custom Application Styling (style.css) -->
     <link rel="stylesheet" href="style.css?v=2.0.0">
 </head>
 <body>
@@ -33,20 +36,27 @@
                 </div>
             </div>
             
+            <!-- Sidebar Navigation Links
+                 Each item toggles a viewport layout tab via JavaScript routing.
+                 data-tab attribute maps to the container viewport IDs. -->
             <nav class="sidebar-nav">
+                <!-- Tab button: Calculator workstation screen -->
                 <button type="button" class="nav-item active" data-tab="calculator">
                     <i class="fa-solid fa-calculator-simple"></i>
                     <span>Workstation</span>
                 </button>
+                <!-- Tab button: Batch PDF Library page and database upload manager -->
                 <button type="button" class="nav-item" data-tab="library">
                     <i class="fa-solid fa-folder-open"></i>
                     <span>PDF Library</span>
                     <span id="queue-badge" class="badge sidebar-badge hidden">0</span>
                 </button>
+                <!-- Tab button: AI Legal Search & chat screen -->
                 <button type="button" class="nav-item" data-tab="chat">
                     <i class="fa-solid fa-comments"></i>
                     <span>AI Precedent Chat</span>
                 </button>
+                <!-- Tab button: Qdrant DB point and collections viewer -->
                 <button type="button" class="nav-item" data-tab="qdrant">
                     <i class="fa-solid fa-database"></i>
                     <span>Qdrant DB Explorer</span>
@@ -66,17 +76,20 @@
              ========================================== -->
         <div class="main-container">
             
-            <!-- Global Header -->
+            <!-- Global Header Section
+                 Displays current tab viewport title and real-time backend/OCR status telemetry -->
             <header class="main-header">
                 <div class="header-title">
                     <div style="display: flex; align-items: center; gap: 12px;">
+                        <!-- Heading text is updated dynamically in Javascript to reflect current navigation -->
                         <h2 id="tab-title-text" style="margin: 0;">Compensation Workstation</h2>
-                        <!-- Header OCR Timer Badge -->
+                        <!-- Header OCR Timer Badge: Telemetry metric for process durations -->
                         <span class="header-badge" id="header-ocr-timer-badge" style="display: inline-flex; align-items: center; gap: 6px; font-family: monospace; font-weight: 700; color: var(--text-secondary); background: rgba(15, 23, 42, 0.04); border: 1px solid var(--border-glass);">
                             <span>⏱</span>
                             <span id="header-ocr-timer-elapsed">Ready</span>
                         </span>
                     </div>
+                    <!-- Connection and Server Status display -->
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <span class="header-badge" id="server-badge">
                             <span class="pulse-indicator active"></span>
@@ -98,7 +111,8 @@
                         </div>
                         
                         <form id="compensation-form" class="compensation-form">
-                            <!-- Case Type Selector -->
+                            <!-- Case Type Selector
+                                 Triggers display toggle for Injury or Death custom forms below. -->
                             <div class="form-group selector-group">
                                 <label for="case-type" class="main-label">Type of Case <span class="req">*</span></label>
                                 <div class="select-wrapper">
@@ -111,10 +125,12 @@
                                 </div>
                             </div>
 
-                            <!-- Case Type Suggestion Panel (Issue 2) -->
+                            <!-- Case Type Suggestion Panel (Issue 2)
+                                 Dynamically visible container populated with machine classifier recommendations. -->
                             <div id="case-type-suggestion" class="case-type-suggestion-container hidden-section"></div>
 
-                            <!-- Single PDF Drag & Drop Uploader (shown after case type selection) -->
+                            <!-- Single PDF Drag & Drop Uploader (shown after case type selection)
+                                 Directly feeds a PDF judgment or claim sheet into the local PaddleOCR pipeline. -->
                             <div id="single-upload-section" class="form-group full-width hidden-section">
                                 <label class="main-label">Upload Case PDF for AI Auto-Fill</label>
                                 <div id="single-drop-zone" class="single-drop-zone">
@@ -126,7 +142,9 @@
                                         <input type="file" id="single-file-input" accept="application/pdf" style="display: none;">
                                     </div>
                                 </div>
-                                                                 <!-- Premium Live OCR Timer Container -->
+                                
+                                <!-- Premium Live OCR Timer Container
+                                     Tracks and monitors real-time text extraction latency inside the workstation. -->
                                 <div id="ocr-timer-container" class="ocr-timer-container" style="margin-top: 12px; padding: 12px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-panel); display: flex; align-items: center; justify-content: space-between; gap: 12px;">
                                     <div style="display: flex; align-items: center; gap: 8px;">
                                         <span id="ocr-timer-status-icon" style="display: inline-flex; align-items: center; justify-content: center;"><i class="fa-solid fa-clock" style="color: var(--color-primary);"></i></span>
@@ -139,12 +157,13 @@
                                 </div>
                             </div>
 
-                            <!-- Common Information Container -->
+                            <!-- Common Information Container (Active for both injury and death categories) -->
                             <div id="shared-fields" class="form-grid hidden-section">
                                 <div class="section-divider full-width">
                                     <span><i class="fa-solid fa-user"></i> Claimant Details</span>
                                 </div>
 
+                                <!-- Claimant Name -->
                                 <div class="form-group">
                                     <label for="name">Name <span class="req">*</span></label>
                                     <div class="input-icon-wrapper">
@@ -153,6 +172,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Father/Husband Guardian Name -->
                                 <div class="form-group">
                                     <label for="father-name">Father / Husband Name</label>
                                     <div class="input-icon-wrapper">
@@ -161,6 +181,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Date of Birth (Optional helper input for age deduction) -->
                                 <div class="form-group">
                                     <label for="date-of-birth">Date of Birth</label>
                                     <div class="input-icon-wrapper">
@@ -169,6 +190,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Date of Accident (Used for calculating interest or relative age timeline) -->
                                 <div class="form-group">
                                     <label for="date-of-accident">Date of Accident <span class="req">*</span></label>
                                     <div class="input-icon-wrapper">
@@ -177,6 +199,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Accident Location Place -->
                                 <div class="form-group">
                                     <label for="place-of-accident">Place of Accident</label>
                                     <div class="input-icon-wrapper">
@@ -185,6 +208,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Claimant Age: Essential metric to choose multipliers and prospects percent -->
                                 <div class="form-group highlighted-group">
                                     <label for="age">Age <span class="req">*</span></label>
                                     <div class="input-icon-wrapper">
@@ -193,6 +217,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Monthly Income value: Used as baseline salary for formula multiplication -->
                                 <div class="form-group">
                                     <label for="monthly-income">Monthly Income (Rs.) <span class="req">*</span></label>
                                     <div class="input-icon-wrapper">
@@ -201,6 +226,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Number of Dependents: Deduces standard percent deduction for self expenses -->
                                 <div class="form-group">
                                     <label for="dependents" id="label-dependents">Number of Dependents <span class="req">*</span></label>
                                     <div class="input-icon-wrapper">
@@ -210,12 +236,14 @@
                                 </div>
                             </div>
 
-                            <!-- DEATH PARAMETERS -->
+                            <!-- DEATH PARAMETERS
+                                 Active fields mapping to Sarla Verma & Pranay Sethi compensation rules for fatal claims. -->
                             <div id="death-fields" class="form-grid hidden-section">
                                 <div class="section-divider full-width">
                                     <span><i class="fa-solid fa-ribbon"></i> Death Parameters</span>
                                 </div>
 
+                                <!-- Marital status: Factors into dependent deductions logic -->
                                 <div class="form-group">
                                     <label for="marital-status">Marital Status <span class="req">*</span></label>
                                     <div class="select-wrapper">
@@ -227,6 +255,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Future Prospects category (Permanent, Self-Employed, Daily Wage etc.) -->
                                 <div class="form-group">
                                     <label for="future-type">Future Prospects Type <span class="req">*</span></label>
                                     <div class="select-wrapper">
@@ -240,6 +269,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Future prospects percentage addition (Calculated via Age and Job Type) -->
                                 <div class="form-group highlighted-group">
                                     <label for="future-prospect">Future Prospects (%) <span class="req">*</span></label>
                                     <div class="input-icon-wrapper">
@@ -248,6 +278,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Age-based multiplier coefficient derived from standard Sarla Verma schedule (Read-only) -->
                                 <div class="form-group highlighted-group">
                                     <label for="death-multiplier">Multiplier <span class="req">*</span></label>
                                     <div class="input-icon-wrapper disabled">
@@ -256,6 +287,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Deduction percentage for personal expenses of deceased (Read-only) -->
                                 <div class="form-group highlighted-group">
                                     <label for="death-deduction">Deduction % <span class="req">*</span></label>
                                     <div class="input-icon-wrapper disabled">
@@ -264,6 +296,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Conventional Head: Consortium award value (standard legal default is Rs. 40,000) -->
                                 <div class="form-group">
                                     <label for="consortium">Loss of Consortium (Rs.) <span class="req">*</span></label>
                                     <div class="input-icon-wrapper">
@@ -272,6 +305,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Conventional Head: Funeral expenses value (standard legal default is Rs. 15,000) -->
                                 <div class="form-group">
                                     <label for="funeral-expenses">Funeral Expenses (Rs.) <span class="req">*</span></label>
                                     <div class="input-icon-wrapper">
@@ -280,6 +314,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Conventional Head: Loss of Estate value (standard legal default is Rs. 15,000) -->
                                 <div class="form-group">
                                     <label for="loss-estate">Loss of Estate (Rs.) <span class="req">*</span></label>
                                     <div class="input-icon-wrapper">
@@ -288,6 +323,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Calculated Loss of Dependency: (Salary + Prospects) * Multiplier * (1 - Deduction) -->
                                 <div class="form-group highlighted-group">
                                     <label for="loss-of-dependency">Loss of Dependency (Rs.)</label>
                                     <div class="input-icon-wrapper disabled">
@@ -296,6 +332,7 @@
                                     </div>
                                 </div>
 
+                                <!-- Final Calculated Death Compensation total sum (Dependency + Conventional Heads) -->
                                 <div class="form-group highlighted-group">
                                     <label for="death-final-compensation">Final Compensation (Rs.)</label>
                                     <div class="input-icon-wrapper disabled">
@@ -427,18 +464,24 @@
                     <div class="panel" id="calculator-right-pane" style="position: relative; display: flex; flex-direction: column; padding: 0; gap: 0; overflow: hidden; height: 100%;">
                         
                         <!-- Right Pane Tabs Navigator -->
+                        <!-- Secondary Right Workspace Panel Navigation Tabs
+                             Toggle visibility of preview, database benchmarking, metrics, and quality inspector tabs. -->
                         <div class="right-pane-tabs" id="right-pane-tabs" style="height: 44px; border-bottom: 1px solid var(--border-color); padding: 0 16px; display: flex; align-items: center; gap: 8px; background: var(--bg-card); flex-shrink: 0;">
+                            <!-- PDF Viewer Preview Panel -->
                             <button type="button" class="pane-tab-btn active" data-pane-tab="pdf" style="background: rgba(11, 58, 114, 0.06); border: 1px solid rgba(11, 58, 114, 0.25); color: var(--color-primary); padding: 6px 12px; border-radius: var(--radius-sm); font-family: 'Outfit', sans-serif; font-size: 0.8rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all var(--transition-fast);">
                                 <i class="fa-solid fa-file-pdf" style="color: var(--color-danger);"></i> PDF Preview
                             </button>
+                            <!-- Qdrant Precedents Database comparison and similarity scoring -->
                             <button type="button" class="pane-tab-btn" data-pane-tab="benchmarking" style="background: transparent; border: 1px solid transparent; color: var(--text-secondary); padding: 6px 12px; border-radius: var(--radius-sm); font-family: 'Outfit', sans-serif; font-size: 0.8rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all var(--transition-fast); position: relative;">
                                 <i class="fa-solid fa-scale-balanced" style="color: var(--color-primary);"></i> Benchmarking
                                 <span id="benchmarking-tab-dot" class="notification-dot hidden"></span>
                             </button>
+                            <!-- Realtime visual metrics metrics, age/multiplier progression progress bars -->
                             <button type="button" class="pane-tab-btn" data-pane-tab="analysis" style="background: transparent; border: 1px solid transparent; color: var(--text-secondary); padding: 6px 12px; border-radius: var(--radius-sm); font-family: 'Outfit', sans-serif; font-size: 0.8rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all var(--transition-fast); position: relative;">
                                 <i class="fa-solid fa-chart-line" style="color: var(--color-success);"></i> Analysis & Metrics
                                 <span id="analysis-tab-dot" class="notification-dot hidden"></span>
                             </button>
+                            <!-- Telemetry diagnostics for PaddleOCR and DPI adjustments -->
                             <button type="button" class="pane-tab-btn" data-pane-tab="ocr-quality" style="background: transparent; border: 1px solid transparent; color: var(--text-secondary); padding: 6px 12px; border-radius: var(--radius-sm); font-family: 'Outfit', sans-serif; font-size: 0.8rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all var(--transition-fast); position: relative;">
                                 <i class="fa-solid fa-square-poll-horizontal" style="color: var(--color-warning);"></i> OCR Inspector (Dev)
                                 <span id="ocr-quality-tab-dot" class="notification-dot hidden"></span>
@@ -818,6 +861,11 @@
         <!-- ==========================================
              MODAL RESULTS SUMMARY
              ========================================== -->
+        <!-- ==========================================
+             MODAL RESULTS SUMMARY
+             ========================================== -->
+        <!-- Calculation Results Modal View
+             Displays after clicking Calculate to show final compensation amount, printing sheets, and dismissal options. -->
         <div id="results-modal" class="modal">
             <div class="modal-content">
                 <div class="modal-header">
@@ -825,11 +873,12 @@
                     <button type="button" id="close-modal-btn" class="close-btn">&times;</button>
                 </div>
                 
+                <!-- Injected breakdown and formulas display container -->
                 <div class="modal-body" id="modal-body-content">
                     <!-- Dynamically injected math dashboard -->
                 </div>
                 
-                <!-- Explicit final-compensation container required by Task 10 -->
+                <!-- Final compensation aggregate indicator showing standard formatted Rupee value -->
                 <div style="text-align: center; padding: 15px; background: rgba(11, 58, 114, 0.05); border-top: 1px solid var(--border-glass);">
                     <span style="font-size: 0.85rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px;">Calculated Settlement Value:</span>
                     <div id="final-compensation" style="font-size: 2.2rem; font-weight: 800; color: var(--color-success); font-family: 'Outfit', sans-serif;">₹ 0</div>
