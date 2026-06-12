@@ -6292,10 +6292,11 @@ This cannot be undone.`)) return;
     // Bind Suggested Question Pills immediately
     document.querySelectorAll(".suggested-question-pill").forEach(pill => {
         pill.addEventListener("click", () => {
-            const questionText = pill.getAttribute("data-question");
+            const questionKey = pill.getAttribute("data-question");
+            const displayLabel = pill.getAttribute("data-display") || questionKey;
             if (assistantChatInput) {
-                assistantChatInput.value = questionText;
-                handleAssistantChatSend();
+                assistantChatInput.value = questionKey;
+                handleAssistantChatSend(displayLabel);
             }
         });
     });
@@ -6310,14 +6311,17 @@ This cannot be undone.`)) return;
         });
     }
 
-    async function handleAssistantChatSend() {
+    async function handleAssistantChatSend(displayLabel = null) {
         const query = assistantChatInput.value.trim();
         if (!query) return;
 
-        appendAssistantChatBubble(query, "user");
+        const isJustify = query === "JUSTIFY_COMPENSATION";
+        const userDisplayText = displayLabel || query;
+
+        appendAssistantChatBubble(userDisplayText, "user");
         assistantChatInput.value = "";
 
-        const loadingId = appendAssistantChatBubble(`<i class="fa-solid fa-spinner fa-spin"></i> Auditing workstation state & searching precedents...`, "bot", true);
+        const loadingId = appendAssistantChatBubble(`<i class="fa-solid fa-spinner fa-spin"></i> ${isJustify ? "Analysing grounds, facts & compensation heads..." : "Auditing workstation state & searching precedents..."}`, "bot", true);
 
         try {
             // Retrieve current workstation inputs for full LLM validation context (Phase 8 integration)
@@ -6353,7 +6357,8 @@ This cannot be undone.`)) return;
                 filename: (filename && filename !== "No File Loaded") ? filename : null,
                 ocr_text: currentOcrRawText ? currentOcrRawText.join("\n") : "",
                 parsed_fields: parsedFields,
-                calculator_result: calculatorResult
+                calculator_result: calculatorResult,
+                is_justify: isJustify
             };
 
             const response = await fetch("/api/chat/pdf", {

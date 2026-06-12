@@ -161,6 +161,7 @@ class PDFChatRequest(BaseModel):
     ocr_text: str = None
     parsed_fields: dict = None
     calculator_result: dict = None
+    is_justify: bool = False
 
 @app.post("/api/chat/pdf")
 async def chat_with_pdf(request: PDFChatRequest):
@@ -221,6 +222,53 @@ async def chat_with_pdf(request: PDFChatRequest):
             chunks_combined = "\n\n".join(workstation_blocks) + "\n\n=== RETRIEVED PRECEDENTS ===\n\n" + chunks_combined
             
         # 4. Construct System Prompt & User Prompt strictly following grounding and safety boundaries
+
+        # Justify Compensation mode
+        justify_block = ""
+        if request.is_justify:
+            question_str = (
+                "Analyse this motor accident compensation case and provide a clear, brief, structured "
+                "justification of whether the tribunal awarded compensation is adequate, excessive, or deficient. "
+                "Base your analysis on: (1) facts of the accident and injuries, "
+                "(2) grounds of appeal raised by the appellant, (3) prayer/relief claimed versus awarded, "
+                "(4) each compensation head awarded versus calculator estimate, "
+                "(5) any legal provisions or precedents cited in the document."
+            )
+            justify_block = (
+                "\n=== JUSTIFY COMPENSATION - DEEP REASONING INSTRUCTIONS ===\n"
+                "The user wants to understand WHY the compensation is under/over/adequate - not just THAT it is.\n\n"
+                "For EACH compensation head you MUST answer:\n"
+                "  (a) What amount was awarded?\n"
+                "  (b) What was the SPECIFIC REASON the tribunal fixed it at that amount?\n"
+                "  (e.g. income capped at minimum wage because no salary slip produced,\n"
+                "  disability calculated limb-specific not whole-body,\n"
+                "  multiplier fixed by age group per Sarla Verma,\n"
+                "  medical bills partially rejected because duplicate receipts)\n"
+                "  (c) Is it adequate/low/high compared to the calculator estimate and why?\n\n"
+                "CRITICAL RULES:\n"
+                "- DO NOT say the amount is low without explaining the tribunal's specific reason.\n"
+                "- DO NOT compare against original claimed amount - compare only against calculator estimate.\n"
+                "- Identify WHO filed the appeal - insurance company or claimant - and frame verdict accordingly.\n"
+                "- Reference actual facts: income figures, disability %, multiplier used, evidence accepted/rejected.\n\n"
+                "FORMAT YOUR RESPONSE EXACTLY AS:\n\n"
+                "**Who Filed the Appeal:** [Claimant seeking enhancement / Insurance company seeking reduction]\n\n"
+                "**Overall Verdict:** [ADEQUATE / UNDER-COMPENSATED / OVER-COMPENSATED] - [one sentence]\n\n"
+                "**Head-wise Analysis:**\n"
+                "- Medical Expenses: Rs.[amount] -> [adequate/low/high]\n"
+                "  Why: [specific reason - bills accepted/rejected, what evidence]\n"
+                "- Loss of Income: Rs.[amount] -> [adequate/low/high]\n"
+                "  Why: [income figure used, multiplier applied, disability % and why tribunal chose these]\n"
+                "- Pain & Suffering: Rs.[amount] -> [adequate/low/high]\n"
+                "  Why: [specific reason]\n"
+                "- Transport/Diet/Attender: Rs.[amount] -> [adequate/low/high]\n"
+                "  Why: [specific reason - receipts produced or not]\n\n"
+                "**Root Causes of Under/Over Compensation:**\n"
+                "[3-5 bullets, each one specific root cause with evidence or rule behind it]\n\n"
+                "**Key Legal Provisions & Precedents Used:**\n"
+                "[Actual sections, acts, case citations from the document]\n\n"
+                "DO NOT invent facts. Only use what is in the document context.\n"
+            )
+
         user_prompt = (
             "You are a Motor Accident Claims Tribunal legal assistant.\n\n"
             "=== STRICTOR GROUNDING INSTRUCTIONS ===\n"
@@ -259,6 +307,7 @@ async def chat_with_pdf(request: PDFChatRequest):
             "=== MATHEMATICAL INTEGRITY RULES ===\n"
             "- Under no circumstances should you compute, recalculate, or override mathematical values, multipliers, or final compensation totals.\n"
             "- If the user asks you to recalculate compensation, apply different multiplier figures, or alter prospects, explicitly instruct them to update the workstation parameters in the left-hand panel.\n\n"
+            f"{justify_block}"
             f"Context:\n{chunks_combined}\n\n"
             f"Question:\n{question_str}"
         )
