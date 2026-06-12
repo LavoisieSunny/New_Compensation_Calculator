@@ -224,6 +224,28 @@ async def chat_with_pdf(request: PDFChatRequest):
         # 4. Construct System Prompt & User Prompt strictly following grounding and safety boundaries
 
         # Justify Compensation mode
+        # Build explicit case facts summary for justify mode
+        case_facts_summary = ""
+        if request.is_justify:
+            pf = request.parsed_fields or {}
+            cr = request.calculator_result or {}
+            case_facts_summary = (
+                f"\n=== EXACT CASE PARAMETERS FROM WORKSTATION ===\n"
+                f"Claimant: {pf.get('name', 'Unknown')}\n"
+                f"Age: {pf.get('age', 'Unknown')} years\n"
+                f"Monthly Income used: Rs. {pf.get('monthly_income', 'Unknown')}\n"
+                f"Disability: {pf.get('disability', pf.get('disability_percent', 'Unknown'))}%\n"
+                f"Case Type: {pf.get('case_type', 'Unknown')}\n"
+                f"Award Amount from PDF: Rs. {pf.get('award_amount', 'Unknown')}\n"
+                f"Calculator Final Amount: Rs. {cr.get('final_amount', 'Unknown')}\n"
+                f"Calculator Loss of Income: Rs. {cr.get('loss_of_income', cr.get('future_income_loss', 'Unknown'))}\n"
+                f"Calculator Medical: Rs. {cr.get('medical_expenses', 'Unknown')}\n"
+                f"Calculator Pain & Suffering: Rs. {cr.get('pain_and_suffering', 'Unknown')}\n"
+                f"Multiplier used: {cr.get('multiplier', 'Unknown')}\n"
+                f"===\n"
+                f"CRITICAL: Use ONLY these exact figures. DO NOT invent or estimate any numbers.\n"
+            )
+
         justify_block = ""
         if request.is_justify:
             question_str = (
@@ -307,6 +329,7 @@ async def chat_with_pdf(request: PDFChatRequest):
             "=== MATHEMATICAL INTEGRITY RULES ===\n"
             "- Under no circumstances should you compute, recalculate, or override mathematical values, multipliers, or final compensation totals.\n"
             "- If the user asks you to recalculate compensation, apply different multiplier figures, or alter prospects, explicitly instruct them to update the workstation parameters in the left-hand panel.\n\n"
+            f"{case_facts_summary}"
             f"{justify_block}"
             f"Context:\n{chunks_combined}\n\n"
             f"Question:\n{question_str}"

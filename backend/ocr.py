@@ -2786,10 +2786,13 @@ def perform_ocr_page_stable(ocr_engine, page_doc, page_idx: int, total_pages: in
             logger.warning(f"PyMuPDF text extraction failed on page {page_num}: {str(e)}")
  
     if len(page_text.strip()) > 200:
-        # Verify text quality
+        # Verify text quality — also check for garbled text (high ratio of short tokens)
         keywords = ["court", "claimant", "petitioner", "respondent", "accident", "compensation", "tribunal", "judgment", "deceased", "injured"]
         hits = sum(1 for kw in keywords if kw in page_text.lower())
-        if hits >= 2:
+        words = [w for w in page_text.split() if w]
+        avg_word_len = sum(len(w) for w in words) / len(words) if words else 0
+        is_garbled = avg_word_len < 2.5 or avg_word_len > 15.0
+        if hits >= 2 and not is_garbled:
             elapsed = time.time() - start_time
             try:
                 ram_mb = int(psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024))
